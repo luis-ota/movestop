@@ -115,9 +115,17 @@ jobs:
           echo "uptimeS antes: ${antes:-sem baseline}"
           echo "uptime_antes=${antes:-}" >> "$GITHUB_OUTPUT"
 
-          code=$(pedir PATCH "$api/applications/$COOLIFY_APP_UUID" /tmp/patch.json \
-            "{\"docker_registry_image_tag\":\"${GITHUB_SHA}\"}")
-          echo "PATCH tag: HTTP $code"
+          # Além da tag, reaplica o healthcheck: o padrão do Coolify usa
+          # "localhost", que resolve para ::1 no Alpine e o Bun só escuta IPv4.
+          patch=$(jq -nc --arg sha "$GITHUB_SHA" '{
+            docker_registry_image_tag: $sha,
+            health_check_enabled: true,
+            health_check_path: "/healthz",
+            health_check_port: "8788",
+            health_check_host: "127.0.0.1"
+          }')
+          code=$(pedir PATCH "$api/applications/$COOLIFY_APP_UUID" /tmp/patch.json "$patch")
+          echo "PATCH tag/healthcheck: HTTP $code"
           [ "$code" = "200" ] || { head -c 500 /tmp/patch.json; exit 1; }
 
           code=$(pedir POST "$api/deploy?uuid=$COOLIFY_APP_UUID&force=true" /tmp/deploy.json)
