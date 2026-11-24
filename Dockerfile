@@ -8,11 +8,13 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY tsconfig.json vite.config.ts index.html ./
+COPY tsconfig.json tsconfig.server.json vite.config.ts index.html ./
 COPY public ./public
 COPY src ./src
 COPY server ./server
 RUN bun run build
+# Typecheck estrito do servidor antes de empacotar o runtime.
+RUN bun run typecheck:server
 # Syntax/import check for the TS server; Bun needs no node_modules at runtime.
 RUN bun build server/index.ts --target=bun --outdir=/tmp/server-check
 

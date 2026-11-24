@@ -2,21 +2,23 @@ name: ci
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".gitignore"
+      - ".dockerignore"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# O instabox é um slot compartilhado. Este grupo só evita duas execuções
-# simultâneas do próprio MOVESTOP; entre repositórios, o instabox enfileira
-# o job automaticamente. cancel-in-progress: false = espera, nunca mata.
-concurrency:
-  group: movestop-instabox
-  cancel-in-progress: false
-
+# Sem concurrency do GitHub: quando o slot do instabox estiver ocupado, o
+# runner do instabox enfileira o job. Assim um run pendente não é cancelado
+# por outro push/PR do mesmo repositório.
 jobs:
   check:
     runs-on: instabox-medium
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,13 +29,37 @@ jobs:
           bun-version: 1.4.4
 
       - name: Instalar dependências
+        timeout-minutes: 5
         run: bun install --frozen-lockfile
 
       - name: Testes do protocolo e do servidor
+        timeout-minutes: 5
         run: bun test
 
       - name: Typecheck + build do cliente
+        timeout-minutes: 5
         run: bun run build
 
+      - name: Typecheck estrito do servidor
+        timeout-minutes: 5
+        run: bun run typecheck:server
+
       - name: Validar imports/sintaxe do servidor
+        timeout-minutes: 5
         run: bun build server/index.ts --target=bun --outdir=/tmp/movestop-server-check
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem sem publicar
+        timeout-minutes: 15
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: movestop:ci
+          cache-from: type=gha,scope=movestop-ci
+          cache-to: type=gha,mode=max,scope=movestop-ci
+          provenance: false
+          sbom: false

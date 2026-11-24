@@ -14,12 +14,8 @@ permissions:
   contents: read
   packages: write
 
-# Fila do instabox: uma execução por vez neste repositório. Se o slot estiver
-# ocupado por outro projeto, o runner do instabox coloca este job em espera.
-concurrency:
-  group: movestop-instabox
-  cancel-in-progress: false
-
+# Sem concurrency do GitHub: o runner instabox-medium é um slot compartilhado
+# e já enfileira jobs de todos os projetos. Nada é cancelado enquanto espera.
 env:
   IMAGE: ghcr.io/luis-ota/movestop
   COOLIFY_URL: https://coolify.wired.rs
@@ -27,8 +23,10 @@ env:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     # Nunca ubuntu-latest: o CI/CD roda no instabox compartilhado.
     runs-on: instabox-medium
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,15 +37,23 @@ jobs:
           bun-version: 1.4.4
 
       - name: Instalar dependências
+        timeout-minutes: 5
         run: bun install --frozen-lockfile
 
       - name: Testes antes de publicar
+        timeout-minutes: 5
         run: bun test
 
       - name: Typecheck + build do cliente
+        timeout-minutes: 5
         run: bun run build
 
+      - name: Typecheck estrito do servidor
+        timeout-minutes: 5
+        run: bun run typecheck:server
+
       - name: Validar imports/sintaxe do servidor
+        timeout-minutes: 5
         run: bun build server/index.ts --target=bun --outdir=/tmp/movestop-server-check
 
       - name: Conferir secrets do Coolify
@@ -68,6 +74,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build e push da imagem
+        timeout-minutes: 20
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -81,39 +88,40 @@ jobs:
           provenance: false
           sbom: false
 
-      - name: Aponta a tag do SHA, dispara o deploy e espera o processo
+      - name: Aponta a tag do SHA e dispara o deploy
         id: deploy
+        timeout-minutes: 10
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
         run: |
           set -euo pipefail
           api="$COOLIFY_URL/api/v1"
-          auth="Authorization: Bearer $COOLIFY_TOKEN"
+
+          # Token fora do argv: outros processos da caixa compartilhada não o veem.
+          cfg=$(mktemp "$RUNNER_TEMP/coolify.XXXXXX")
+          trap 'rm -f "$cfg"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$COOLIFY_TOKEN" > "$cfg"
+          chmod 600 "$cfg"
 
           # O painel do Coolify pode responder 522/5xx enquanto o deploy roda.
-          pedir() { # pedir METODO URL ARQUIVO [JSON]
-            local metodo=$1 url=$2 arq=$3 dados=${4:-} codigo=000 t
-            for t in $(seq 1 8); do
+          pedir() { # pedir MAX METODO URL ARQUIVO [JSON]
+            local max=$1 metodo=$2 url=$3 arq=$4 dados=${5:-} codigo=000 t
+            for t in $(seq 1 "$max"); do
               if [ -n "$dados" ]; then
-                codigo=$(curl -sS --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
-                  -H "$auth" -H 'Content-Type: application/json' --data "$dados" "$url" || true)
+                codigo=$(curl -sS --config "$cfg" --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
+                  -H 'Content-Type: application/json' --data "$dados" "$url" || true)
               else
-                codigo=$(curl -sS --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
-                  -H "$auth" "$url" || true)
+                codigo=$(curl -sS --config "$cfg" --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
+                  "$url" || true)
               fi
               case "$codigo" in 200|201) echo "$codigo"; return 0;; esac
-              echo "  tentativa $t: HTTP ${codigo:-000}" >&2
-              sleep 10
+              echo "  tentativa $t/$max: HTTP ${codigo:-000}" >&2
+              [ "$t" -lt "$max" ] && sleep 10
             done
             echo "${codigo:-000}"
             return 1
           }
-
-          # Uptime antes do restart: é a prova de que o container novo subiu.
-          antes=$(curl -sS --max-time 10 "$SITE_URL/healthz" 2>/dev/null | jq -r '.uptime // empty' 2>/dev/null || true)
-          echo "uptimeS antes: ${antes:-sem baseline}"
-          echo "uptime_antes=${antes:-}" >> "$GITHUB_OUTPUT"
 
           # Além da tag, reaplica o healthcheck: o padrão do Coolify usa
           # "localhost", que resolve para ::1 no Alpine e o Bun só escuta IPv4.
@@ -124,11 +132,12 @@ jobs:
             health_check_port: "8788",
             health_check_host: "127.0.0.1"
           }')
-          code=$(pedir PATCH "$api/applications/$COOLIFY_APP_UUID" /tmp/patch.json "$patch")
+          code=$(pedir 8 PATCH "$api/applications/$COOLIFY_APP_UUID" /tmp/patch.json "$patch")
           echo "PATCH tag/healthcheck: HTTP $code"
           [ "$code" = "200" ] || { head -c 500 /tmp/patch.json; exit 1; }
 
-          code=$(pedir POST "$api/deploy?uuid=$COOLIFY_APP_UUID&force=true" /tmp/deploy.json)
+          # POST é menos idempotente que PATCH: no máximo duas tentativas.
+          code=$(pedir 2 POST "$api/deploy?uuid=$COOLIFY_APP_UUID&force=true" /tmp/deploy.json)
           echo "POST deploy: HTTP $code"
           [ "$code" = "200" ] || { head -c 500 /tmp/deploy.json; exit 1; }
 
@@ -136,16 +145,21 @@ jobs:
           [ -n "$dep" ] || { echo "sem deployment_uuid na resposta"; head -c 500 /tmp/deploy.json; exit 1; }
           echo "deployment=$dep" >> "$GITHUB_OUTPUT"
 
-      - name: Espera o container novo responder
+      - name: Espera o deployment terminar e a URL responder
+        timeout-minutes: 15
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           set -euo pipefail
           dep='${{ steps.deploy.outputs.deployment }}'
-          antes='${{ steps.deploy.outputs.uptime_antes }}'
-          auth="Authorization: Bearer $COOLIFY_TOKEN"
+          cfg=$(mktemp "$RUNNER_TEMP/coolify.XXXXXX")
+          trap 'rm -f "$cfg"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$COOLIFY_TOKEN" > "$cfg"
+          chmod 600 "$cfg"
+
           estado() {
-            curl -sS --max-time 10 -o /tmp/dep.json -H "$auth" \
+            rm -f /tmp/dep.json
+            curl -sS --config "$cfg" --max-time 10 -o /tmp/dep.json \
               "$COOLIFY_URL/api/v1/deployments/$dep" 2>/dev/null || true
             jq -r '.status // "?"' /tmp/dep.json 2>/dev/null || echo "?"
           }
@@ -153,33 +167,42 @@ jobs:
 
           for i in $(seq 1 120); do # 120 × 5 s = 10 min
             code=$(curl -sS --max-time 5 -o /tmp/health.json -w '%{http_code}' "$SITE_URL/healthz" 2>/dev/null || echo 000)
-            uptime=$(jq -r '.uptime // empty' /tmp/health.json 2>/dev/null || true)
-            echo "[$i/120] /healthz => HTTP $code uptimeS=${uptime:-?} (antes: ${antes:-?})"
-
-            if [ "$code" = "200" ] && [[ "$uptime" =~ ^[0-9]+$ ]]; then
-              if { [ -n "$antes" ] && [ "$uptime" -lt "$antes" ]; } \
-                || { [ -z "$antes" ] && [ "$uptime" -le 90 ]; }; then
-                echo "container novo no ar (uptimeS=${uptime}s)"
-                echo "deployment $dep: $(estado)"
-                exit 0
-              fi
+            st=$(estado)
+            echo "[$i/120] /healthz => HTTP $code; deployment=$st"
+            if [ "$code" = "200" ] && [ "$st" = "finished" ]; then
+              echo "deployment concluído e URL saudável"
+              exit 0
             fi
-
-            if [ $((i % 5)) = 0 ]; then
-              case "$(estado)" in
-                failed|cancelled|failed-with-warning)
-                  echo "Coolify marcou o deployment como falho:"
-                  logs
-                  exit 1;;
-              esac
-            fi
+            case "$st" in
+              failed|cancelled|failed-with-warning)
+                echo "Coolify marcou o deployment como falho:"
+                logs
+                exit 1;;
+            esac
             sleep 5
           done
-          echo "o container novo não apareceu em 10 min"
+          echo "o deployment não terminou com a URL saudável em 10 min"
           logs
           exit 1
 
+      - name: Confere a tag persistida no Coolify
+        timeout-minutes: 3
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+        run: |
+          set -euo pipefail
+          cfg=$(mktemp "$RUNNER_TEMP/coolify.XXXXXX")
+          trap 'rm -f "$cfg"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$COOLIFY_TOKEN" > "$cfg"
+          chmod 600 "$cfg"
+          curl -sS --config "$cfg" --max-time 25 \
+            "$COOLIFY_URL/api/v1/applications/$COOLIFY_APP_UUID" -o /tmp/app.json
+          jq -e --arg sha "$GITHUB_SHA" '.docker_registry_image_tag == $sha' /tmp/app.json >/dev/null
+          echo "tag do app confirmada: $GITHUB_SHA"
+
       - name: Verificar a URL real
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           for i in $(seq 1 12); do

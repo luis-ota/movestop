@@ -62,6 +62,9 @@ const PORT = readIntegerEnv('PORT', 8788, 1, 65_535);
 /** Hard cap from the protocol/deploy budget: never more than 200 rooms. */
 const MAX_ROOMS = readIntegerEnv('MAX_ROOMS', 200, 1, 200);
 const TRUST_PROXY = readBooleanEnv('TRUST_PROXY', false);
+if (IS_PRODUCTION && !TRUST_PROXY) {
+  console.warn('[duel] produção sem TRUST_PROXY=1: o limite de conexões pode usar o IP do proxy para todos');
+}
 const parsedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 const MAX_CONNECTIONS_PER_IP = 5;
@@ -88,6 +91,7 @@ const DIST_DIR = resolve(import.meta.dir, '..', 'dist');
 const INDEX_FILE = resolve(DIST_DIR, 'index.html');
 const ASSETS_DIR = resolve(DIST_DIR, 'assets');
 const FONTS_DIR = resolve(DIST_DIR, 'fonts');
+let clientAvailable = false;
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -687,7 +691,8 @@ function healthResponse(method: string): Response {
   }
 
   const body = JSON.stringify({
-    ok: true,
+    ok: clientAvailable,
+    client: clientAvailable ? 'ok' : 'missing',
     uptime: Math.round(process.uptime()),
     rooms: rooms.size,
     maxRooms: MAX_ROOMS,
@@ -700,7 +705,7 @@ function healthResponse(method: string): Response {
     'Cache-Control': 'no-store',
   });
 
-  return new Response(method === 'HEAD' ? null : body, { status: 200, headers });
+  return new Response(method === 'HEAD' ? null : body, { status: clientAvailable ? 200 : 503, headers });
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +884,7 @@ log(
   }`,
 );
 
-if (!(await Bun.file(INDEX_FILE).exists())) {
+clientAvailable = await Bun.file(INDEX_FILE).exists();
+if (!clientAvailable) {
   warn('dist/index.html não encontrado; o WebSocket funciona, mas o cliente retorna 503 até rodar "bun run build"');
 }

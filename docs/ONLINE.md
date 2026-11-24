@@ -171,7 +171,8 @@ O server não comprime HTTP; deixe gzip/brotli no proxy. Ele também não define
 ```bash
 bun install --frozen-lockfile
 bun run build
-# O tsc do projeto cobre apenas src/; isto valida sintaxe/imports do servidor:
+# Typecheck estrito do servidor e validação extra de sintaxe/imports:
+bun run typecheck:server
 bun build server/index.ts --target=bun --outdir=/tmp/movestop-server-check
 bun run server          # ou: PORT=8788 bun server/index.ts
 ```
@@ -228,7 +229,7 @@ O estágio final roda como UID/GID `10001`, expõe `8788` e tem healthcheck em `
 
 ## Checklist de deploy
 
-- [ ] `bun install --frozen-lockfile && bun run build` (ou build Docker) sem erros.
+- [ ] `bun install --frozen-lockfile && bun run build && bun run typecheck:server` (ou build Docker) sem erros.
 - [ ] `NODE_ENV=production` definido no processo.
 - [ ] `ALLOWED_ORIGINS` com os domínios reais (inclua `www` se usado).
 - [ ] TLS terminado no proxy; o público acessa somente `https://` / `wss://`.
@@ -287,6 +288,7 @@ Se houver CDN/Cloudflare ou múltiplos proxies, ajuste a extração de IP e a al
 - **Logs não contêm nomes, códigos de sala, IPs nem corpos de mensagem.** Para investigação de abuso, use os logs do proxy/CDN.
 - **`/healthz` é público** e informa contagens agregadas; restrinja no proxy se isso for sensível.
 - **CSP usa `connect-src ws: wss:`** (qualquer host WebSocket), como especificado. Em produção, pode ser endurecida para o domínio real.
+- **Cloudflare Web Analytics:** se o beacon automático estiver ativo na zona, ele injeta `static.cloudflareinsights.com/beacon.min.js`; a CSP `script-src 'self'` bloqueia e o console mostra um aviso. O jogo não quebra. Para console limpo, desative o Analytics apenas para este host ou amplie a CSP conscientemente.
 - **Sem TLS no processo Bun.** O modo seguro depende de HTTPS/WSS no proxy; `ws://` em produção expõe o tráfego a quem estiver na rede.
 
 Em resumo: a autoridade de jogo e os controles de borda são reais, mas isto é uma base de protótipo. Não é um sistema completo de anti-cheat, anti-DDoS, autenticação ou pagamentos.

@@ -2846,8 +2846,18 @@ kbd {
   }
   .menu-screen .menu-hero { margin: auto 0 0; padding: 14vh 0 3vh; }
   .menu-screen .game-title { font-size: clamp(65px, 19vw, 100px); }
-  .menu-screen .menu-actions { flex-direction: row; align-items: center; gap: 3px; }
-  .menu-screen .menu-actions .btn { width: auto; padding-inline: 10px; }
+  .menu-screen .menu-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .menu-screen .menu-actions .btn {
+    width: 100%;
+    padding-inline: 10px;
+    justify-content: center;
+    text-align: center;
+  }
   .menu-screen .menu-actions .btn:not(.ghost) { min-width: 92px; }
   .menu-screen .menu-footer .meta { text-align: left; }
 }

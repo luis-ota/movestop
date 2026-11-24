@@ -17,14 +17,19 @@ Salas são em memória; reiniciar o container encerra partidas em andamento.
 
 ## CI/CD (instabox)
 
-- `.github/workflows/ci.yml` roda em PR/manual: install, `bun test`, build e checagem do servidor.
-- `.github/workflows/deploy.yml` roda em push na `main`: repete testes/build, publica a imagem
+- `.github/workflows/ci.yml` roda em PR/manual (ignorando docs): install, `bun test`, build do cliente, typecheck estrito do servidor e build da imagem Docker sem publicar.
+- `.github/workflows/deploy.yml` roda em push na `main` (ou manual na `main`): repete testes/build/typecheck, publica a imagem
   `linux/amd64` no GHCR, aponta a tag do SHA no Coolify, dispara o deploy e verifica
   `https://movestop.wired.rs/healthz` + a home real.
 - **Todos os jobs usam `runs-on: instabox-medium`.** Nada de `ubuntu-latest`.
-- `concurrency: movestop-instabox` com `cancel-in-progress: false`: duas execuções do MOVESTOP
-  entram em fila, não se matam. Se o slot único do instabox estiver ocupado por outro projeto,
-  o próprio serviço deixa o job em espera; não apague a caixa de outro projeto.
+- **Não há `concurrency` do GitHub**: o runner `instabox-medium` é um slot compartilhado e já
+  enfileira jobs de todos os projetos. Assim um run pendente não é cancelado por outro push/PR.
+  Se o slot estiver ocupado, espere; não apague a caixa de outro projeto.
+- Jobs e steps têm `timeout-minutes` para não prender o slot por horas. O deploy só é aceito
+  quando o Coolify marca o deployment como `finished`, a tag persistida é o SHA do commit e
+  `/healthz` + a home respondem 200.
+- O PATCH de deploy reaplica o healthcheck em `127.0.0.1:8788`; `localhost` no Alpine pode
+  resolver para `::1`, enquanto o Bun escuta apenas IPv4.
 - Para trabalho local em uma caixa instabox, use a fila compartilhada:
 
 ```sh

@@ -10,12 +10,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "start": "bun server/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "three": "^0.187.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.5",
     "@types/three": "^0.187.0",
     "playwright": "^1.65.1",
     "typescript": "^7.0.2",

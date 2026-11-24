@@ -26,6 +26,7 @@ export interface ServerPlayer {
   id: string;
   side: 0 | 1;
   name: string;
+  skin?: string;
   ws: RoomSocket;
   x: number;
   z: number;

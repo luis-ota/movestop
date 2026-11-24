@@ -12,6 +12,7 @@ Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three
 bun install
 bun run dev      # http://localhost:5173
 bun run build
+bun run typecheck:server
 bun run preview
 ```
 
