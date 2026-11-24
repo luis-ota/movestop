@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  analogMoveVector,
   angleDiff,
   capSpeed,
   inCone,
@@ -90,6 +91,14 @@ describe('movimento por teclado', () => {
     const fast = capSpeed(13.5, 0, 6);
     expect(fast.x).toBeCloseTo(6, 6);
     expect(capSpeed(3, 4, 6)).toEqual({ x: 3, z: 4 });
+  });
+
+  it('preserva a magnitude analógica do joystick e aplica zona morta', () => {
+    const half = analogMoveVector(0.5, 0);
+    expect(half.x).toBeCloseTo(0.5, 6);
+    expect(half.z).toBe(0);
+    expect(Math.hypot(analogMoveVector(0.6, 0.8).x, analogMoveVector(0.6, 0.8).z)).toBeCloseTo(1, 6);
+    expect(analogMoveVector(0.1, 0)).toEqual({ x: 0, z: 0 });
   });
 });
 

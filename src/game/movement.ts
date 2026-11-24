@@ -123,6 +123,14 @@ export function keyMoveVector(up: boolean, down: boolean, left: boolean, right: 
   return { x, z };
 }
 
+/** Touch stick vector with a dead zone and preserved analog magnitude. */
+export function analogMoveVector(x: number, z: number, deadzone = 0.12): Point {
+  const len = Math.hypot(x, z);
+  if (!Number.isFinite(len) || len <= deadzone) return { x: 0, z: 0 };
+  const magnitude = Math.min(1, len);
+  return { x: (x / len) * magnitude, z: (z / len) * magnitude };
+}
+
 /**
  * Drops the leftover dash speed once the dash is over so the player does not
  * skate on for another ~0.25s. Speeds up to `cap` are kept as they are.

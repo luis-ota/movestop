@@ -23,6 +23,7 @@ import {
   type DifficultyDef,
 } from './difficulty';
 import {
+  analogMoveVector,
   capSpeed,
   inCone,
   keyMoveVector,
@@ -1195,14 +1196,8 @@ export class Game {
   }
 
   private getMoveVector(): { x: number; z: number } {
-    let x = 0;
-    let z = 0;
-    if (Math.hypot(this.touchMove.x, this.touchMove.z) > 0.12) {
-      x = this.touchMove.x;
-      z = this.touchMove.z;
-      const len = Math.hypot(x, z);
-      return { x: x / len, z: z / len };
-    }
+    const touch = analogMoveVector(this.touchMove.x, this.touchMove.z);
+    if (touch.x !== 0 || touch.z !== 0) return touch;
     return keyMoveVector(
       this.keys.has('KeyW') || this.keys.has('ArrowUp'),
       this.keys.has('KeyS') || this.keys.has('ArrowDown'),
