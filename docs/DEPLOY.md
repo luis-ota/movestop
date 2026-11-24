@@ -55,7 +55,7 @@ Deploy normal: `git push origin main` (ou `workflow_dispatch` no GitHub Actions)
 Rollback por tag:
 
 ```sh
-TOK=$(cat /home/luis/backups/aither-20261110-1920/meta/coolify-token)
+TOK="<token-do-Coolify>"
 UUID=ddysqlw9mrchkehvf1qhfqyr
 SHA=<sha-anterior>
 curl -X PATCH "https://coolify.wired.rs/api/v1/applications/$UUID" \
