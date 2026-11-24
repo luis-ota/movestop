@@ -4,6 +4,7 @@ import { UI, type DeathView, type UIActions, type WinView } from './ui/ui';
 import { loadSave, persist } from './game/save';
 import { findItem, findPack, findSkin, findTheme, findTrail, REVIVE_COST, REVIVE_COST_STEP } from './game/catalog';
 import { LEVELS } from './game/levels';
+import { isDifficulty, type Difficulty } from './game/difficulty';
 import { audio } from './game/audio';
 import { purchasePack } from './game/payments';
 import { DuelClient, type DuelEndInfo } from './multiplayer/duel-client';
@@ -43,7 +44,18 @@ function buildLoadout(): Loadout {
     theme: findTheme(save.theme),
     trail: findTrail(save.trail),
     upgrades: save.owned.filter((id) => id.startsWith('up-')),
+    difficulty: save.difficulty,
   };
+}
+
+function setDifficulty(value: Difficulty): void {
+  if (!isDifficulty(value) || value === save.difficulty) return;
+  save.difficulty = value;
+  persist(save);
+  game.setLoadout(buildLoadout());
+  if (game.getState() === 'briefing') {
+    game.startLevel(game.getLevelIndex(), false);
+  }
 }
 
 let ui!: UI;
@@ -86,6 +98,7 @@ const actions: UIActions = {
     game.beginPlay();
     ui.showHUD();
   },
+  setDifficulty: (difficulty) => setDifficulty(difficulty),
   pause: () => {
     if (game.getState() !== 'playing' && game.getState() !== 'briefing') return;
     game.pause();

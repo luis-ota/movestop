@@ -386,13 +386,26 @@ class WeatherParticles {
   private mode: BiomeDef['weather'];
   private bounds = { x: 17, z: 14 };
   private time = 0;
+  private baseCount: number;
+  private maxCount: number;
 
   constructor(biome: BiomeDef, halfW = 14, halfH = 11) {
     this.mode = biome.weather;
     this.bounds = { x: halfW + 3, z: halfH + 3 };
     const scale = Math.min(2.3, Math.max(1, (halfW * halfH) / 154));
-    const count =
-      this.mode === 'snow' ? Math.round(120 * scale) : this.mode === 'rain' ? Math.round(150 * scale) : this.mode === 'fireflies' ? Math.round(38 * scale) : Math.round(70 * scale);
+    const baseCount =
+      this.mode === 'snow'
+        ? Math.round(120 * scale)
+        : this.mode === 'rain'
+          ? Math.round(150 * scale)
+          : this.mode === 'fireflies'
+            ? Math.round(38 * scale)
+            : this.mode === 'petals' || this.mode === 'leaves'
+              ? Math.round(90 * scale)
+              : Math.round(70 * scale);
+    const slowWeatherBoost = this.mode === 'petals' || this.mode === 'leaves' || this.mode === 'dust' || this.mode === 'ash';
+    this.baseCount = baseCount;
+    this.maxCount = slowWeatherBoost ? Math.round(baseCount * 1.8) : baseCount;
     let geo: THREE.BufferGeometry;
     if (this.mode === 'rain') geo = new THREE.BoxGeometry(0.012, 0.3, 0.012);
     else if (this.mode === 'snow') geo = new THREE.BoxGeometry(0.048, 0.048, 0.048);
@@ -408,10 +421,11 @@ class WeatherParticles {
       blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending,
       side: THREE.DoubleSide,
     });
-    this.mesh = new THREE.InstancedMesh(geo, mat, count);
+    this.mesh = new THREE.InstancedMesh(geo, mat, this.maxCount);
+    this.mesh.count = this.baseCount;
     this.mesh.frustumCulled = false;
     const color = new THREE.Color();
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < this.maxCount; i++) {
       const x = (Math.random() - 0.5) * this.bounds.x * 2;
       const z = (Math.random() - 0.5) * this.bounds.z * 2;
       const y =
@@ -459,6 +473,12 @@ class WeatherParticles {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 
+  setTimeScale(timeScale: number): void {
+    const slow = Number.isFinite(timeScale) && timeScale < 0.45;
+    const boosted = slow && (this.mode === 'petals' || this.mode === 'leaves' || this.mode === 'dust' || this.mode === 'ash');
+    this.mesh.count = boosted ? this.maxCount : this.baseCount;
+  }
+
   update(dt: number): void {
     if (dt <= 0) return;
     this.time += dt;
@@ -501,7 +521,7 @@ class WeatherParticles {
 export interface Landscape {
   group: THREE.Group;
   lights: THREE.PointLight[];
-  update: (dt: number) => void;
+  update: (dt: number, timeScale?: number) => void;
   dispose: () => void;
 }
 
@@ -1556,7 +1576,8 @@ export function buildLandscape(opts: LandscapeOptions): Landscape {
   return {
     group,
     lights,
-    update: (dt: number) => {
+    update: (dt: number, timeScale = 1) => {
+      particles.setTimeScale(timeScale);
       particles.update(dt);
       if (grassTimeUniform) grassTimeUniform.value += dt;
       if (waterTex) waterTex.offset.x += dt * 0.018;

@@ -59,6 +59,16 @@ Os controles aparecem só durante a partida, nos cantos, com fundo translúcido:
 
 O HUD no celular mantém munição, vida, objetivo e tempo; radar e dicas de teclado ficam ocultos para não cobrir o campo. O briefing mostra a versão de toque dos controles.
 
+## Dificuldade
+
+A campanha tem três modos, escolhidos no briefing antes de entrar:
+
+- **Fácil:** mais vida e munição; inimigos mais lentos e menos frequentes.
+- **Difícil:** padrão recomendado; inimigos mais rápidos e agressivos. Escudos levam dois tiros ou um corte.
+- **Impossível:** inimigos resistentes, implacáveis e com menos munição.
+
+A escolha fica salva localmente e vale para a campanha. O duelo online continua com regras competitivas fixas.
+
 ## Duelo online
 
 O modo online é um **duelo 1v1 autoritativo**. O servidor em `server/` guarda a arena, a simulação, a vida, munição, dano, aparo, foco, rounds e o vencedor; o cliente só envia intenções de movimento, mira e ações. Não há posição, hit ou resultado decidido no navegador.

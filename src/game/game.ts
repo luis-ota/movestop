@@ -14,6 +14,15 @@ import { getTextures } from './textures';
 import { airFor } from './atmosphere';
 import { findSkin } from './catalog';
 import {
+  bossHpFor,
+  enemyHpFor,
+  getDifficulty,
+  playerMaxHpFor,
+  startingAmmoFor,
+  type Difficulty,
+  type DifficultyDef,
+} from './difficulty';
+import {
   DUEL_GRID,
   DUEL_RULES,
   duelColliders,
@@ -27,6 +36,7 @@ export interface Loadout {
   theme: ThemeDef;
   trail: TrailDef;
   upgrades: string[];
+  difficulty: Difficulty;
 }
 
 export interface RadarBlip {
@@ -277,6 +287,7 @@ export class Game {
   private canvas: HTMLCanvasElement;
   private events: GameEvents;
   private loadout: Loadout;
+  private difficulty: DifficultyDef;
 
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -383,6 +394,7 @@ export class Game {
     this.canvas = canvas;
     this.events = events;
     this.loadout = loadout;
+    this.difficulty = getDifficulty(loadout.difficulty);
 
     const coarse = window.matchMedia('(pointer: coarse)').matches;
     this.lowQuality = coarse || window.innerWidth < 760 || (navigator.hardwareConcurrency ?? 8) <= 4;
@@ -507,6 +519,7 @@ export class Game {
     const themeChanged = loadout.theme.id !== this.loadout.theme.id;
     const skinChanged = loadout.skin.id !== this.loadout.skin.id;
     this.loadout = loadout;
+    this.difficulty = getDifficulty(loadout.difficulty);
     if (themeChanged) {
       this.applyTheme(loadout.theme, this.currentBiomeId);
       if (this.mode === 'menu') this.menuDirty = true;
@@ -570,8 +583,14 @@ export class Game {
 
     const skin = this.loadout.skin;
     const upgrades = new Set(this.loadout.upgrades);
-    const maxHp = 1 + (skin.extraHp ?? 0) + (upgrades.has('up-kabuto') ? 1 : 0);
-    const ammo = level.ammo + (upgrades.has('up-polvora') ? 2 : 0);
+    const maxHp = playerMaxHpFor(
+      1 + (skin.extraHp ?? 0) + (upgrades.has('up-kabuto') ? 1 : 0),
+      this.loadout.difficulty,
+    );
+    const ammo = startingAmmoFor(
+      level.ammo + (upgrades.has('up-polvora') ? 2 : 0),
+      this.loadout.difficulty,
+    );
     const parryRadius = 1.9 * (skin.parryMult ?? 1) * (upgrades.has('up-ukaeshi') ? 1.2 : 1);
     const dashMax = 1.5 * (skin.dashMult ?? 1) * (upgrades.has('up-hayai') ? 0.65 : 1);
     const parryMax = 1.4 * (upgrades.has('up-ukaeshi') ? 0.6 : 1);
@@ -982,7 +1001,7 @@ export class Game {
       b.mesh.rotation.y = b.angle;
     }
 
-    this.landscape?.update(simDt);
+    this.landscape?.update(simDt, snap?.timeScale ?? 1);
     this.updateDuelCamera(dt);
     this.fx.update(dt);
     this.shake = Math.max(0, this.shake - dt * 2.4);
@@ -1627,11 +1646,12 @@ export class Game {
       kind: 'boss',
     };
     this.colliders.push(collider);
+    const bossHp = bossHpFor(level.boss.hp, this.loadout.difficulty);
     this.boss = {
       x,
       z,
-      hp: level.boss.hp,
-      maxHp: level.boss.hp,
+      hp: bossHp,
+      maxHp: bossHp,
       phase: 1,
       angle: 0,
       cooldown: 2.2,
@@ -1716,7 +1736,7 @@ export class Game {
       x,
       z,
       angle: Math.atan2((this.player?.x ?? 0) - x, (this.player?.z ?? 0) - z),
-      hp: def.hp,
+      hp: enemyHpFor(type, this.loadout.difficulty),
       alive: true,
       avatar,
       fireTimer: 1.1 + Math.random() * 1.2,
@@ -1846,7 +1866,7 @@ export class Game {
     this.updateCoins(dt);
     this.updateAmmoPickups(dt);
     this.updateBoss(simDt, dt);
-    this.landscape?.update(simDt);
+    this.landscape?.update(simDt, this.timeScale);
     this.separateEnemies();
 
     if (p.invuln <= 0) {
@@ -1967,7 +1987,7 @@ export class Game {
   private updateEnemies(simDt: number, realDt: number): void {
     const p = this.player!;
     const level = this.level!;
-    const windupMult = this.loadout.skin.enemyWindupMult ?? 1;
+    const windupMult = (this.loadout.skin.enemyWindupMult ?? 1) * this.difficulty.enemyWindupMult;
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -1994,13 +2014,13 @@ export class Game {
         e.lungeCd = Math.max(0, e.lungeCd - simDt);
         if (e.lungeTime > 0) {
           e.lungeTime -= simDt;
-          this.moveEnemy(e, e.lungeX * 7.4 * simDt, e.lungeZ * 7.4 * simDt);
+          this.moveEnemy(e, e.lungeX * 7.4 * this.difficulty.enemySpeedMult * simDt, e.lungeZ * 7.4 * this.difficulty.enemySpeedMult * simDt);
           if (Math.hypot(e.x - p.x, e.z - p.z) < 0.62) {
             this.hitPlayer();
           }
         } else if (e.lungeCd <= 0 && dist < 3.4) {
           e.lungeTime = 0.3;
-          e.lungeCd = 1.7;
+          e.lungeCd = 1.7 * this.difficulty.enemyFireMult;
           e.lungeX = dirX;
           e.lungeZ = dirZ;
           this.fx.ring(e.x, e.z, 0xff9a1f, 1.0, 0.3);
@@ -2009,12 +2029,12 @@ export class Game {
         }
       } else if (e.type === 'shield') {
         if (dist > 1.9) {
-          const pace = see ? e.def.moveSpeed : e.def.moveSpeed * 0.8;
+          const pace = (see ? e.def.moveSpeed : e.def.moveSpeed * 0.8) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
       } else if (e.type === 'sniper') {
         if (!see && dist > 0.9) {
-          this.seekEnemy(e, dirX, dirZ, 0.46, simDt);
+          this.seekEnemy(e, dirX, dirZ, 0.46 * this.difficulty.enemySpeedMult, simDt);
         }
       } else if (e.type === 'gunner' || e.type === 'burster') {
         if (see) {
@@ -2029,6 +2049,8 @@ export class Game {
             mx -= dirX * 0.45;
             mz -= dirZ * 0.45;
           }
+          mx *= this.difficulty.enemySpeedMult;
+          mz *= this.difficulty.enemySpeedMult;
           const beforeX = e.x;
           const beforeZ = e.z;
           this.moveEnemy(e, mx * simDt, mz * simDt);
@@ -2037,7 +2059,7 @@ export class Game {
           }
         } else {
           // close the distance even when a rock sits between us
-          const pace = dist > 6 ? 0.55 : 0.34;
+          const pace = (dist > 6 ? 0.55 : 0.34) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
       }
@@ -2069,7 +2091,7 @@ export class Game {
           e.burstTimer = e.def.burstGap;
           if (e.laser) e.laser!.visible = false;
           if (e.laserMat) e.laserMat.opacity = 0;
-          e.fireTimer = e.def.fireEvery / level.fireScale + Math.random() * 0.7;
+          e.fireTimer = (e.def.fireEvery / level.fireScale) * this.difficulty.enemyFireMult + Math.random() * 0.7;
           e.avatar.setCharge(0);
           e.charge = 0;
         }
@@ -2105,7 +2127,7 @@ export class Game {
     const tz = p.z + p.vz * lead;
     let angle = Math.atan2(tx - e.x, tz - e.z);
     angle += (Math.random() - 0.5) * e.def.spread * 2;
-    const speed = e.def.bulletSpeed * level.speedScale;
+    const speed = e.def.bulletSpeed * level.speedScale * this.difficulty.enemyBulletSpeedMult;
     const sx = e.x + Math.sin(angle) * 0.52;
     const sz = e.z + Math.cos(angle) * 0.52;
     this.spawnBullet(sx, sz, angle, speed, 'enemy', e.def.color, e.def.color, 0.95, false, e);
@@ -2170,7 +2192,7 @@ export class Game {
               break;
             }
           }
-          this.killEnemy(e);
+          this.damageEnemy(e, 1);
           this.removeBullet(b);
           hitSomething = true;
           break;
@@ -2196,7 +2218,7 @@ export class Game {
             const px = x0 + dx * t;
             const pz = z0 + dz * t;
             if (Math.hypot(px - e.x, pz - e.z) <= e.def.radius + 0.05) {
-              this.killEnemy(e);
+              this.damageEnemy(e, 1);
               this.removeBullet(b);
               hitSomething = true;
               break;
@@ -2250,6 +2272,20 @@ export class Game {
     });
   }
 
+  private damageEnemy(e: Enemy, amount: number): void {
+    if (!e.alive || amount <= 0) return;
+    e.hp = Math.max(0, e.hp - amount);
+    if (e.hp <= 0) {
+      this.killEnemy(e);
+      return;
+    }
+    e.avatar.flash();
+    this.fx.sparks(e.x, 0.62, e.z, 0xffe3b0, 4, 3);
+    this.fx.ring(e.x, e.z, e.def.color, 0.65, 0.22);
+    audio.impact();
+    this.shake = Math.max(this.shake, 0.08);
+  }
+
   private killEnemy(e: Enemy): void {
     if (!e.alive) return;
     e.alive = false;
@@ -2268,7 +2304,7 @@ export class Game {
       e.laserMat?.dispose();
       e.laser = null;
     }
-    if (!this.level?.noAmmoDrops && (Math.random() < 0.34 || e.type === 'shield' || this.level?.boss)) {
+    if (!this.level?.noAmmoDrops && (Math.random() < 0.34 * this.difficulty.ammoDropMult || e.type === 'shield' || this.level?.boss)) {
       this.dropAmmo(e.x, e.z);
     }
     if (this.player) {

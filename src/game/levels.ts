@@ -81,7 +81,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
   shield: {
     type: 'shield',
     label: 'ESCUDO',
-    hp: 1,
+    hp: 2,
     radius: 0.38,
     fireEvery: 3.0,
     windup: 0.7,

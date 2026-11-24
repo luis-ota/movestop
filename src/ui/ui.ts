@@ -21,6 +21,7 @@ import {
   SkinDef,
 } from '../game/catalog';
 import type { SaveData } from '../game/save';
+import { DIFFICULTIES, DIFFICULTY_ORDER, getDifficulty, type Difficulty } from '../game/difficulty';
 import type { HudState, LevelInfo } from '../game/game';
 import { formatBRL } from '../game/payments';
 import * as THREE from 'three';
@@ -53,6 +54,7 @@ export interface UIActions {
   menu: () => void;
   selectLevel: (index: number) => void;
   begin: () => void;
+  setDifficulty: (difficulty: Difficulty) => void;
   pause: () => void;
   resume: () => void;
   restart: () => void;
@@ -361,6 +363,11 @@ export class UI {
       case 'begin':
         this.actions.begin();
         break;
+      case 'difficulty':
+        if (el.dataset.difficulty === 'easy' || el.dataset.difficulty === 'hard' || el.dataset.difficulty === 'impossible') {
+          this.actions.setDifficulty(el.dataset.difficulty);
+        }
+        break;
       case 'pause':
         this.actions.pause();
         break;
@@ -623,6 +630,7 @@ export class UI {
 
   showMenu(): void {
     const save = this.getSave();
+    const difficulty = getDifficulty(save.difficulty);
     const next = this.nextLevel(save);
     const nextIdx = LEVELS.findIndex((l) => l.id === next.id);
     const cleared = Object.values(save.stars).filter((s) => s > 0).length;
@@ -644,7 +652,7 @@ export class UI {
         <div class="next-line">
           <span class="next-chip">Fase ${String(next.id).padStart(2, '0')}</span>
           <strong>${next.name.replace(/\n/g, ' ')}</strong>
-          <span class="next-sub">${cleared}/8 concluídas</span>
+          <span class="next-sub">${cleared}/8 concluídas · ${difficulty.label}</span>
         </div>
       </main>
       <footer class="menu-footer">
@@ -910,6 +918,13 @@ export class UI {
 
   showBriefing(info: LevelInfo): void {
     const level = info.level;
+    const difficulty = getDifficulty(this.getSave().difficulty);
+    const difficultyOptions = DIFFICULTY_ORDER.map((id) => {
+      const def = DIFFICULTIES[id];
+      return `<button class="difficulty-btn ${id === difficulty.id ? 'is-active' : ''}" type="button" data-action="difficulty" data-difficulty="${id}" aria-pressed="${id === difficulty.id}">
+        <b>${def.label}</b><span>${def.short}</span>
+      </button>`;
+    }).join('');
     const el = this.screen('briefing');
     el.innerHTML = `<div class="briefing-card">
       <div class="kicker">Fase ${String(level.id).padStart(2, '0')} · ${ACTS.find((a) => a.id === level.act)?.name ?? ''}</div>
@@ -919,6 +934,10 @@ export class UI {
         <div><span class="k">Munição</span><span class="v ${info.ammo === 0 ? 'red' : ''}">${info.ammo === 0 ? 'Sem balas' : `${info.ammo} balas`}</span></div>
         <div><span class="k">Vida</span><span class="v">${info.maxHp}</span></div>
         <div><span class="k">Ondas</span><span class="v">${info.waves}</span></div>
+      </div>
+      <div class="difficulty-picker" role="group" aria-label="Dificuldade">
+        <div class="difficulty-head"><span class="k">Dificuldade</span><em>${difficulty.description}</em></div>
+        <div class="difficulty-options">${difficultyOptions}</div>
       </div>
       <div class="brief-char"><span>Personagem</span><b>${info.character.name}</b><em>${info.character.perkDesc}</em></div>
       <div class="brief-controls">
@@ -1181,9 +1200,10 @@ export class UI {
   showPause(): void {
     const level = this.currentLevelId ? LEVELS.find((l) => l.id === this.currentLevelId) : null;
     const save = this.getSave();
+    const difficulty = getDifficulty(save.difficulty);
     const el = this.screen('pause');
     el.innerHTML = `<div class="dark-card pause-card">
-      <div class="kicker">${level ? `Fase ${String(level.id).padStart(2, '0')} · ${level.name.replace(/\n/g, ' ')}` : 'MOVESTOP'}</div>
+      <div class="kicker">${level ? `Fase ${String(level.id).padStart(2, '0')} · ${level.name.replace(/\n/g, ' ')}` : 'MOVESTOP'} · ${difficulty.label}</div>
       <h2>Pausa.</h2>
       <p>O tempo está do seu lado. Ele também espera.</p>
       <div class="pause-actions">

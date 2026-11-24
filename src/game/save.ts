@@ -1,4 +1,5 @@
 import { DEFAULT_OWNED, DEFAULT_SKIN, DEFAULT_THEME, DEFAULT_TRAIL } from './catalog';
+import { isDifficulty, type Difficulty } from './difficulty';
 
 export interface SaveData {
   version: 1;
@@ -7,6 +8,7 @@ export interface SaveData {
   skin: string;
   theme: string;
   trail: string;
+  difficulty: Difficulty;
   /** number of unlocked levels, 1..3 */
   unlocked: number;
   stars: Record<string, number>;
@@ -27,6 +29,7 @@ export function defaultSave(): SaveData {
     skin: DEFAULT_SKIN,
     theme: DEFAULT_THEME,
     trail: DEFAULT_TRAIL,
+    difficulty: 'hard',
     unlocked: 1,
     stars: {},
     best: {},
@@ -53,6 +56,7 @@ export function loadSave(): SaveData {
     };
     save.coins = Math.max(0, Math.floor(save.coins || 0));
     save.unlocked = Math.min(8, Math.max(1, Math.floor(save.unlocked || 1)));
+    save.difficulty = isDifficulty(save.difficulty) ? save.difficulty : base.difficulty;
     return save;
   } catch {
     return defaultSave();

@@ -934,12 +934,16 @@ kbd {
 .screen.briefing {
   align-items: center;
   justify-content: center;
+  overflow-y: auto;
   background: rgba(16, 18, 15, 0.4);
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
 }
 .briefing-card {
   width: min(590px, 94vw);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  margin: auto;
   background: var(--washi);
   border: 1px solid var(--line-strong);
   border-top: 2px solid var(--vermilion);
@@ -1022,6 +1026,72 @@ kbd {
 }
 .brief-grid .v.red {
   color: var(--vermilion);
+}
+.difficulty-picker {
+  margin: 0 0 16px;
+}
+.difficulty-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.difficulty-head .k {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+.difficulty-head em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-align: right;
+}
+.difficulty-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.difficulty-btn {
+  min-height: 44px;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.24);
+  color: var(--ink-mute);
+  text-align: left;
+  transition: border-color 0.18s, background 0.18s, color 0.18s, transform 0.18s;
+}
+.difficulty-btn b {
+  display: block;
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.1;
+}
+.difficulty-btn span {
+  display: block;
+  margin-top: 3px;
+  font-size: 8px;
+  line-height: 1.25;
+}
+.difficulty-btn:hover {
+  border-color: var(--ink-mute);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+.difficulty-btn.is-active {
+  border-color: var(--vermilion);
+  background: var(--vermilion);
+  color: #fff7e8;
+}
+.difficulty-btn[data-difficulty='impossible'].is-active {
+  border-color: var(--ink);
+  background: var(--ink);
 }
 .brief-char {
   display: flex;
@@ -2734,6 +2804,25 @@ kbd {
   }
   .brief-grid .v {
     font-size: 15px;
+  }
+  .difficulty-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .difficulty-head em {
+    text-align: left;
+    font-size: 10px;
+  }
+  .difficulty-btn {
+    min-height: 40px;
+    padding: 6px;
+  }
+  .difficulty-btn b {
+    font-size: 12px;
+  }
+  .difficulty-btn span {
+    font-size: 7px;
   }
   .brief-controls {
     display: none;

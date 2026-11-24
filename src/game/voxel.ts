@@ -265,6 +265,7 @@ export class EnemyAvatar {
   private eyeR: THREE.Mesh;
   private ring: THREE.Mesh;
   private phase = 0;
+  private flashValue = 0;
 
   constructor(accent: number, body: number, scale: number, type: string) {
     this.phase = Math.random() * Math.PI * 2;
@@ -353,9 +354,16 @@ export class EnemyAvatar {
     this.ring.scale.setScalar(0.8 + v * 0.55);
   }
 
+  flash(): void {
+    this.flashValue = 1;
+  }
+
   animate(dt: number, timeScale: number): void {
     this.phase += dt * (1.4 + timeScale * 2.5);
     this.group.position.y = Math.sin(this.phase) * 0.012;
+    this.flashValue = Math.max(0, this.flashValue - dt * 5);
+    this.bodyMat.emissive.setRGB(this.flashValue * 0.9, this.flashValue * 0.55, this.flashValue * 0.2);
+    this.bodyMat.emissiveIntensity = this.flashValue * 1.8;
   }
 }
 
