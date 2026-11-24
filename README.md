@@ -1,6 +1,22 @@
 # MOVESTOP
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Deploy](https://github.com/luis-ota/movestop/actions/workflows/deploy.yml/badge.svg)](https://github.com/luis-ota/movestop/actions/workflows/deploy.yml)
+[![Built with Bun](https://img.shields.io/badge/Bun-000000?logo=bun&logoColor=white)](https://bun.sh)
+[![Three.js](https://img.shields.io/badge/Three.js-000000?logo=three.js&logoColor=white)](https://threejs.org)
+
 Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three.js; a campanha é 100% estática (save em `localStorage`, checkout de demonstração) e o duelo online usa um servidor Bun autoritativo.
+
+## Sobre
+
+MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de oito fases e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
+
+Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 60 testes automatizados do protocolo, combate, rounds, snapshots, abuso e política de proxy.
+
+<p align="center">
+  <img src="docs/assets/movestop-duel.jpg" alt="Duelo online do MOVESTOP no pátio de outono" width="720">
+  <img src="docs/assets/movestop-mobile.jpg" alt="Menu do MOVESTOP em uma tela mobile" width="220">
+</p>
 
 ## Produção
 
@@ -72,6 +88,19 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/multiplayer/` — transporte WebSocket e adaptador de input.
 - `server/` — servidor autoritativo, salas, validação e hardening.
 - `tests/` — 60 testes do protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+
+## Open source
+
+MOVESTOP is released under the [MIT License](LICENSE). The project is currently created and maintained by [@luis-ota](https://github.com/luis-ota); a friend may help later, but no one else currently owns part of it.
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Roadmap](ROADMAP.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- [Maintainers](MAINTAINERS.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+Issues and pull requests are welcome. There is no CLA at this time.
 
 ## Monetização
 
