@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# O instabox é um slot compartilhado. Este grupo só evita duas execuções
+# simultâneas do próprio MOVESTOP; entre repositórios, o instabox enfileira
+# o job automaticamente. cancel-in-progress: false = espera, nunca mata.
+concurrency:
+  group: movestop-instabox
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: instabox-medium
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Testes do protocolo e do servidor
+        run: bun test
+
+      - name: Typecheck + build do cliente
+        run: bun run build
+
+      - name: Validar imports/sintaxe do servidor
+        run: bun build server/index.ts --target=bun --outdir=/tmp/movestop-server-check

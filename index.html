@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>MOVESTOP — o tempo só anda quando você anda</title>
+  <meta name="description" content="MOVESTOP é um shooter voxel onde o tempo só passa quando você se move. Pare, respire, desvie. Jogue grátis no navegador." />
+  <meta name="theme-color" content="#f1eee4" />
+  <meta property="og:title" content="MOVESTOP — o tempo só anda quando você anda" />
+  <meta property="og:description" content="Shooter voxel de tempo congelado. Cada passo é uma decisão." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23111114'/%3E%3Crect x='12' y='12' width='26' height='26' fill='%23f1eee4'/%3E%3Crect x='30' y='30' width='22' height='22' fill='%23e23b2e'/%3E%3C/svg%3E" />
+  <link rel="preload" href="/fonts/shippori-mincho-700.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/manrope-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/manrope-600.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/noto-serif-jp-banner.woff2" as="font" type="font/woff2" crossorigin />
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="online-ui"></div>
+  <div id="boot">
+    <div class="boot-inner">
+      <span class="boot-mark">M<span class="boot-dot"></span></span>
+      <span class="boot-label">carregando o tempo</span>
+    </div>
+  </div>
+  <noscript>
+    <div style="position:fixed;inset:0;display:grid;place-items:center;background:#f1eee4;color:#111114;font-family:monospace;padding:24px;text-align:center;z-index:99">
+      MOVESTOP precisa de JavaScript habilitado para congelar o tempo.
+    </div>
+  </noscript>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

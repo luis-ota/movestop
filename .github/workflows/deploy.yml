@@ -1,0 +1,189 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".gitignore"
+      - ".dockerignore"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# Fila do instabox: uma execução por vez neste repositório. Se o slot estiver
+# ocupado por outro projeto, o runner do instabox coloca este job em espera.
+concurrency:
+  group: movestop-instabox
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/luis-ota/movestop
+  COOLIFY_URL: https://coolify.wired.rs
+  SITE_URL: https://movestop.wired.rs
+
+jobs:
+  release:
+    # Nunca ubuntu-latest: o CI/CD roda no instabox compartilhado.
+    runs-on: instabox-medium
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Testes antes de publicar
+        run: bun test
+
+      - name: Typecheck + build do cliente
+        run: bun run build
+
+      - name: Validar imports/sintaxe do servidor
+        run: bun build server/index.ts --target=bun --outdir=/tmp/movestop-server-check
+
+      - name: Conferir secrets do Coolify
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+        run: |
+          [ -n "$COOLIFY_TOKEN" ] || { echo "secret COOLIFY_TOKEN ausente"; exit 1; }
+          [ -n "$COOLIFY_APP_UUID" ] || { echo "secret COOLIFY_APP_UUID ausente"; exit 1; }
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=movestop
+          cache-to: type=gha,mode=max,scope=movestop
+          provenance: false
+          sbom: false
+
+      - name: Aponta a tag do SHA, dispara o deploy e espera o processo
+        id: deploy
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+        run: |
+          set -euo pipefail
+          api="$COOLIFY_URL/api/v1"
+          auth="Authorization: Bearer $COOLIFY_TOKEN"
+
+          # O painel do Coolify pode responder 522/5xx enquanto o deploy roda.
+          pedir() { # pedir METODO URL ARQUIVO [JSON]
+            local metodo=$1 url=$2 arq=$3 dados=${4:-} codigo=000 t
+            for t in $(seq 1 8); do
+              if [ -n "$dados" ]; then
+                codigo=$(curl -sS --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
+                  -H "$auth" -H 'Content-Type: application/json' --data "$dados" "$url" || true)
+              else
+                codigo=$(curl -sS --max-time 25 -o "$arq" -w '%{http_code}' -X "$metodo" \
+                  -H "$auth" "$url" || true)
+              fi
+              case "$codigo" in 200|201) echo "$codigo"; return 0;; esac
+              echo "  tentativa $t: HTTP ${codigo:-000}" >&2
+              sleep 10
+            done
+            echo "${codigo:-000}"
+            return 1
+          }
+
+          # Uptime antes do restart: é a prova de que o container novo subiu.
+          antes=$(curl -sS --max-time 10 "$SITE_URL/healthz" 2>/dev/null | jq -r '.uptime // empty' 2>/dev/null || true)
+          echo "uptimeS antes: ${antes:-sem baseline}"
+          echo "uptime_antes=${antes:-}" >> "$GITHUB_OUTPUT"
+
+          code=$(pedir PATCH "$api/applications/$COOLIFY_APP_UUID" /tmp/patch.json \
+            "{\"docker_registry_image_tag\":\"${GITHUB_SHA}\"}")
+          echo "PATCH tag: HTTP $code"
+          [ "$code" = "200" ] || { head -c 500 /tmp/patch.json; exit 1; }
+
+          code=$(pedir POST "$api/deploy?uuid=$COOLIFY_APP_UUID&force=true" /tmp/deploy.json)
+          echo "POST deploy: HTTP $code"
+          [ "$code" = "200" ] || { head -c 500 /tmp/deploy.json; exit 1; }
+
+          dep=$(jq -r '.deployments[0].deployment_uuid // .deployment_uuid // empty' /tmp/deploy.json)
+          [ -n "$dep" ] || { echo "sem deployment_uuid na resposta"; head -c 500 /tmp/deploy.json; exit 1; }
+          echo "deployment=$dep" >> "$GITHUB_OUTPUT"
+
+      - name: Espera o container novo responder
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          dep='${{ steps.deploy.outputs.deployment }}'
+          antes='${{ steps.deploy.outputs.uptime_antes }}'
+          auth="Authorization: Bearer $COOLIFY_TOKEN"
+          estado() {
+            curl -sS --max-time 10 -o /tmp/dep.json -H "$auth" \
+              "$COOLIFY_URL/api/v1/deployments/$dep" 2>/dev/null || true
+            jq -r '.status // "?"' /tmp/dep.json 2>/dev/null || echo "?"
+          }
+          logs() { jq -r '.logs // ""' /tmp/dep.json 2>/dev/null | tail -80; }
+
+          for i in $(seq 1 120); do # 120 × 5 s = 10 min
+            code=$(curl -sS --max-time 5 -o /tmp/health.json -w '%{http_code}' "$SITE_URL/healthz" 2>/dev/null || echo 000)
+            uptime=$(jq -r '.uptime // empty' /tmp/health.json 2>/dev/null || true)
+            echo "[$i/120] /healthz => HTTP $code uptimeS=${uptime:-?} (antes: ${antes:-?})"
+
+            if [ "$code" = "200" ] && [[ "$uptime" =~ ^[0-9]+$ ]]; then
+              if { [ -n "$antes" ] && [ "$uptime" -lt "$antes" ]; } \
+                || { [ -z "$antes" ] && [ "$uptime" -le 90 ]; }; then
+                echo "container novo no ar (uptimeS=${uptime}s)"
+                echo "deployment $dep: $(estado)"
+                exit 0
+              fi
+            fi
+
+            if [ $((i % 5)) = 0 ]; then
+              case "$(estado)" in
+                failed|cancelled|failed-with-warning)
+                  echo "Coolify marcou o deployment como falho:"
+                  logs
+                  exit 1;;
+              esac
+            fi
+            sleep 5
+          done
+          echo "o container novo não apareceu em 10 min"
+          logs
+          exit 1
+
+      - name: Verificar a URL real
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            health=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$SITE_URL/healthz" || echo 000)
+            home=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 10 "$SITE_URL/" || echo 000)
+            echo "[$i/12] /healthz => $health $(head -c 80 /tmp/health.json 2>/dev/null || true)"
+            echo "[$i/12] / => $home"
+            if [ "$health" = "200" ] && [ "$home" = "200" ] && grep -qi "MOVESTOP" /tmp/home.html; then
+              echo "deploy verificado: https://movestop.wired.rs"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "a URL real não respondeu com o bundle do MOVESTOP"
+          exit 1
