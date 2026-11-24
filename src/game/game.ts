@@ -23,6 +23,15 @@ import {
   type DifficultyDef,
 } from './difficulty';
 import {
+  capSpeed,
+  inCone,
+  keyMoveVector,
+  liveCount,
+  moveCircle,
+  nextCombo,
+  resolveCircle,
+} from './movement';
+import {
   DUEL_GRID,
   DUEL_RULES,
   duelColliders,
@@ -497,6 +506,7 @@ export class Game {
 
   setTouchFire(on: boolean): void {
     this.touchFire = on;
+    if (!on) this.touchAim.active = false;
   }
 
   inputSlash(): void {
@@ -1055,7 +1065,8 @@ export class Game {
     if (this.state !== 'playing' && this.state !== 'briefing') return;
     this.pausedFrom = this.state;
     this.state = 'paused';
-    this.touchFire = false;
+    // a stick/key held while the menu opened would otherwise keep "pressing" after resume
+    this.releaseInputs();
   }
 
   resume(): void {
@@ -1084,6 +1095,12 @@ export class Game {
     p.parryTime = 0;
     p.slashCd = 0;
     p.slashWindow = 0;
+    p.slashCombo = 0;
+    p.specialCd = 0;
+    p.dashTime = 0;
+    this.shotPulse = 0;
+    this.slowmo = 0;
+    this.touchFire = false;
     p.ammo = Math.max(p.ammo, this.level.ammo);
     p.avatar.group.visible = true;
     p.avatar.group.rotation.x = 0;
@@ -1138,8 +1155,15 @@ export class Game {
 
   private bindInput(): void {
     window.addEventListener('keydown', (e) => {
+      // typing in a text field (online room code, etc.) must never reach the game
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+        return;
+      }
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
       this.keys.add(e.code);
+      // Holding a key makes the OS auto-repeat keydown; every action is one press, one try.
+      if (e.repeat) return;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.tryDash();
       if (e.code === 'KeyE' || e.code === 'KeyQ') this.tryParry();
       if (e.code === 'KeyF') this.trySlash();
@@ -1147,7 +1171,7 @@ export class Game {
       if (e.code === 'Space') this.tryShoot();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => this.releaseInputs());
 
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('pointerdown', (e) => {
@@ -1157,6 +1181,8 @@ export class Game {
       if (e.button === 2) this.tryParry();
     });
     window.addEventListener('pointermove', (e) => {
+      // a finger on the joystick/buttons is not the cursor; it used to spin the character toward the thumb
+      if (e.pointerType === 'touch') return;
       const r = this.canvas.getBoundingClientRect();
       this.pointer.x = ((e.clientX - r.left) / r.width) * 2 - 1;
       this.pointer.y = -((e.clientY - r.top) / r.height) * 2 + 1;
@@ -1177,16 +1203,34 @@ export class Game {
       const len = Math.hypot(x, z);
       return { x: x / len, z: z / len };
     }
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) z -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) z += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) x -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) x += 1;
-    const len = Math.hypot(x, z);
-    if (len > 0) {
-      x /= len;
-      z /= len;
-    }
-    return { x, z };
+    return keyMoveVector(
+      this.keys.has('KeyW') || this.keys.has('ArrowUp'),
+      this.keys.has('KeyS') || this.keys.has('ArrowDown'),
+      this.keys.has('KeyA') || this.keys.has('ArrowLeft'),
+      this.keys.has('KeyD') || this.keys.has('ArrowRight'),
+    );
+  }
+
+  /** Heading of the cursor/aim pad right now, so actions fire exactly where the player points. */
+  private aimAngle(p: PlayerState): number {
+    if (this.touchAim.active) return Math.atan2(this.touchAim.x, this.touchAim.z);
+    const dx = p.aimX - p.x;
+    const dz = p.aimZ - p.z;
+    return Math.hypot(dx, dz) > 0.05 ? Math.atan2(dx, dz) : p.angle;
+  }
+
+  /** Snaps the facing to the aim before an attack; the smoothed angle lags ~50-100ms behind. */
+  private faceAim(p: PlayerState): void {
+    p.angle = this.aimAngle(p);
+  }
+
+  /** Releases every held input; used on pause, blur and level changes. */
+  releaseInputs(): void {
+    this.keys.clear();
+    this.touchMove.x = 0;
+    this.touchMove.z = 0;
+    this.touchFire = false;
+    this.touchAim.active = false;
   }
 
   private tryDash(): void {
@@ -1197,8 +1241,9 @@ export class Game {
     let dx = move.x;
     let dz = move.z;
     if (dx === 0 && dz === 0) {
-      dx = Math.sin(p.angle);
-      dz = Math.cos(p.angle);
+      const a = this.aimAngle(p);
+      dx = Math.sin(a);
+      dz = Math.cos(a);
     }
     p.dashTime = 0.16;
     p.dashX = dx;
@@ -1228,6 +1273,7 @@ export class Game {
     }
     p.ammo -= 1;
     p.fireCd = 0.2;
+    this.faceAim(p);
     const dx = Math.sin(p.angle);
     const dz = Math.cos(p.angle);
     const sx = p.x + dx * 0.58;
@@ -1246,20 +1292,21 @@ export class Game {
     if (this.mode === 'duel') return;
     const p = this.player;
     if (!p || this.state !== 'playing' || p.slashCd > 0) return;
+    this.faceAim(p);
     const dashing = p.dashTime > 0;
-    const combo = p.slashWindow > 0 ? (p.slashCombo + 1) % 3 : 0;
+    // slashCombo stores the index of the NEXT hit (it used to be incremented twice, skipping hit 2)
+    const combo = nextCombo(p.slashWindow, p.slashCombo);
     const finisher = combo === 2 || dashing;
     const radius = dashing ? 3.1 : finisher ? 2.75 : 1.95;
-    const arc = finisher ? Math.PI * 2 : 1.35;
+    // half-angle of the swing: 1.35rad each side = 155 degrees in front
+    const halfArc = finisher ? Math.PI : 1.35;
     p.slashCd = dashing ? 0.16 : 0.26;
     p.slashTime = 0.26;
     p.slashCombo = finisher ? 0 : combo + 1;
     p.slashWindow = 0.58;
     p.avatar.slash(combo, dashing);
     const lunge = dashing ? 0.7 : 0.32;
-    p.x += Math.sin(p.angle) * lunge;
-    p.z += Math.cos(p.angle) * lunge;
-    this.collidePlayer(p);
+    this.movePlayer(p, Math.sin(p.angle) * lunge, Math.cos(p.angle) * lunge);
 
     let hits = 0;
     let cleared = 0;
@@ -1267,11 +1314,7 @@ export class Game {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (d > radius + e.def.radius) continue;
-      if (!finisher) {
-        const target = Math.atan2(e.x - p.x, e.z - p.z);
-        const diff = Math.abs(Math.atan2(Math.sin(target - p.angle), Math.cos(target - p.angle)));
-        if (diff > arc) continue;
-      }
+      if (!inCone(p.x, p.z, p.angle, e.x, e.z, halfArc)) continue;
       this.killEnemy(e);
       hits++;
     }
@@ -1279,25 +1322,21 @@ export class Game {
       if (!b.alive || b.owner !== 'enemy') continue;
       const d = Math.hypot(b.x - p.x, b.z - p.z);
       if (d > radius + 0.2) continue;
-      if (!finisher) {
-        const target = Math.atan2(b.x - p.x, b.z - p.z);
-        const diff = Math.abs(Math.atan2(Math.sin(target - p.angle), Math.cos(target - p.angle)));
-        if (diff > arc) continue;
-      }
+      if (!inCone(p.x, p.z, p.angle, b.x, b.z, halfArc)) continue;
       this.reflectBullet(b);
       cleared++;
     }
     if (this.boss && this.boss.alive) {
       const d = Math.hypot(this.boss.x - p.x, this.boss.z - p.z);
-      const target = Math.atan2(this.boss.x - p.x, this.boss.z - p.z);
-      const diff = Math.abs(Math.atan2(Math.sin(target - p.angle), Math.cos(target - p.angle)));
-      if (d < radius + 1.2 && (finisher || diff < arc)) {
+      if (d < radius + 1.2 && inCone(p.x, p.z, p.angle, this.boss.x, this.boss.z, halfArc)) {
         this.damageBoss();
         hits++;
       }
     }
     for (const barrel of this.barrels) {
-      if (barrel.alive && Math.hypot(barrel.x - p.x, barrel.z - p.z) < radius) this.igniteBarrel(barrel);
+      if (!barrel.alive) continue;
+      if (Math.hypot(barrel.x - p.x, barrel.z - p.z) >= radius) continue;
+      if (inCone(p.x, p.z, p.angle, barrel.x, barrel.z, halfArc)) this.igniteBarrel(barrel);
     }
     if (hits > 0 || cleared > 0) {
       this.focus = Math.min(100, this.focus + hits * 7 + cleared * 4 + (dashing ? 5 : 0));
@@ -1321,13 +1360,13 @@ export class Game {
     this.focus = 0;
     p.specialCd = 0.9;
     p.invuln = Math.max(p.invuln, 1.0);
+    this.faceAim(p);
     const angle = p.angle;
     const fromX = p.x;
     const fromZ = p.z;
     const reach = this.loadout.skin.id === 'skin-kitsune' ? 4.4 : 3.3;
-    p.x += Math.sin(angle) * reach;
-    p.z += Math.cos(angle) * reach;
-    this.collidePlayer(p);
+    // swept, so the Iai stops at the first wall instead of teleporting past it
+    this.movePlayer(p, Math.sin(angle) * reach, Math.cos(angle) * reach);
     const toX = p.x;
     const toZ = p.z;
     p.avatar.iai();
@@ -1391,6 +1430,7 @@ export class Game {
     if (this.mode === 'duel') return;
     const p = this.player;
     if (!p || this.state !== 'playing' || p.parryCd > 0) return;
+    this.faceAim(p);
     p.parryTime = 0.18;
     p.parryCd = p.parryMax;
     p.avatar.pulseParry();
@@ -1728,6 +1768,8 @@ export class Game {
       laserMat = new THREE.LineBasicMaterial({ color: 0xff3d6a, transparent: true, opacity: 0, depthWrite: false });
       laser = new THREE.Line(geo, laserMat);
       laser.visible = false;
+      // its endpoints are rewritten every frame; the bounding sphere of the first two points would cull it
+      laser.frustumCulled = false;
       this.gameGroup.add(laser);
     }
 
@@ -1791,6 +1833,14 @@ export class Game {
       p.aimZ = p.z + this.touchAim.z * 7;
       const touchAngle = Math.atan2(this.touchAim.x, this.touchAim.z);
       p.angle = angleLerp(p.angle, touchAngle, Math.min(1, dt * 30));
+    } else if (document.body.classList.contains('touch')) {
+      // no aim pad used yet: face where you run (there is no cursor on touch screens)
+      if (p.moving) {
+        p.aimX = p.x + move.x * 7;
+        p.aimZ = p.z + move.z * 7;
+      }
+      const aimAngle = Math.atan2(p.aimX - p.x, p.aimZ - p.z);
+      p.angle = angleLerp(p.angle, aimAngle, Math.min(1, dt * 22));
     } else {
       this.raycaster.setFromCamera(this.pointer, this.camera);
       if (this.raycaster.ray.intersectPlane(this.aimPlane, this.aimPoint)) {
@@ -1825,18 +1875,22 @@ export class Game {
     if (this.touchFire) this.tryShoot();
 
     // movement
+    const speed = 4.75;
     if (p.dashTime > 0) {
       p.dashTime -= dt;
       p.vx = p.dashX * 13.5;
       p.vz = p.dashZ * 13.5;
+      if (p.dashTime <= 0) {
+        // dash over: do not keep skating at dash speed while the damping catches up
+        const v = capSpeed(p.vx, p.vz, speed * 1.25);
+        p.vx = v.x;
+        p.vz = v.z;
+      }
     } else {
-      const speed = 4.75;
       p.vx = damp(p.vx, move.x * speed, 14, dt);
       p.vz = damp(p.vz, move.z * speed, 14, dt);
     }
-    p.x += p.vx * dt;
-    p.z += p.vz * dt;
-    this.collidePlayer(p);
+    this.movePlayer(p, p.vx * dt, p.vz * dt);
     p.avatar.group.position.set(p.x, 0, p.z);
     p.avatar.group.rotation.y = p.angle;
     p.avatar.animate(dt, p.moving, this.timeScale, p.dashTime > 0);
@@ -1890,28 +1944,21 @@ export class Game {
     }
   }
 
+  private static readonly PLAYER_RADIUS = 0.3;
+
+  /** Resolves the player against solids without moving it (spawn, revive, snapshots). */
   private collidePlayer(p: PlayerState): void {
-    const r = 0.3;
-    for (let pass = 0; pass < 2; pass++) {
-      for (const c of this.colliders) {
-        if (!c.active) continue;
-        const cx = clamp(p.x, c.minX, c.maxX);
-        const cz = clamp(p.z, c.minZ, c.maxZ);
-        let dx = p.x - cx;
-        let dz = p.z - cz;
-        const d2 = dx * dx + dz * dz;
-        if (d2 < r * r) {
-          if (d2 > 1e-9) {
-            const d = Math.sqrt(d2);
-            const push = r - d;
-            p.x += (dx / d) * push;
-            p.z += (dz / d) * push;
-          } else {
-            p.x += r;
-          }
-        }
-      }
-    }
+    resolveCircle(p, Game.PLAYER_RADIUS, this.colliders);
+    this.clampPlayerToArena(p);
+  }
+
+  /** Moves the player in sub-steps so dashes, lunges and Iai never tunnel through walls. */
+  private movePlayer(p: PlayerState, dx: number, dz: number): void {
+    moveCircle(p, dx, dz, Game.PLAYER_RADIUS, this.colliders);
+    this.clampPlayerToArena(p);
+  }
+
+  private clampPlayerToArena(p: PlayerState): void {
     const maxX = this.halfW - 0.5 + 0.18;
     const maxZ = this.halfH - 0.5 + 0.18;
     p.x = clamp(p.x, -maxX, maxX);
@@ -1920,29 +1967,8 @@ export class Game {
 
   private moveEnemy(e: Enemy, dx: number, dz: number): void {
     if (dx === 0 && dz === 0) return;
-    e.x += dx;
-    e.z += dz;
     const r = e.def.radius;
-    for (let pass = 0; pass < 2; pass++) {
-      for (const c of this.colliders) {
-        if (!c.active) continue;
-        const cx = clamp(e.x, c.minX, c.maxX);
-        const cz = clamp(e.z, c.minZ, c.maxZ);
-        const ddx = e.x - cx;
-        const ddz = e.z - cz;
-        const d2 = ddx * ddx + ddz * ddz;
-        if (d2 < r * r) {
-          if (d2 > 1e-9) {
-            const d = Math.sqrt(d2);
-            const push = r - d;
-            e.x += (ddx / d) * push;
-            e.z += (ddz / d) * push;
-          } else {
-            e.x += r;
-          }
-        }
-      }
-    }
+    moveCircle(e, dx, dz, r, this.colliders);
     const maxX = this.halfW - 0.5 - r + 0.2;
     const maxZ = this.halfH - 0.5 - r + 0.2;
     e.x = clamp(e.x, -maxX, maxX);
@@ -2257,6 +2283,8 @@ export class Game {
       b.mesh.position.set(b.x, 0.55, b.z);
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
     }
+    // dead bullets used to pile up in the array for the whole level
+    if (this.bullets.some((b) => !b.alive)) this.bullets = this.bullets.filter((b) => b.alive);
   }
 
   private removeBullet(b: Bullet): void {
@@ -2504,7 +2532,10 @@ export class Game {
   }
 
   private dropAmmo(x: number, z: number): void {
-    if (this.ammoPickups.length > 12) return;
+    // only pickups still on the floor count; collected ones used to stay in the list
+    // and silently shut off every ammo drop after the 13th of a level
+    this.ammoPickups = this.ammoPickups.filter((a) => !a.taken);
+    if (liveCount(this.ammoPickups) > 12) return;
     const mesh = makeAmmoMesh();
     mesh.position.set(x, 0.35, z);
     this.gameGroup.add(mesh);
@@ -2521,6 +2552,9 @@ export class Game {
       if (Math.hypot(a.x - p.x, a.z - p.z) < 0.6) {
         a.taken = true;
         a.mesh.visible = false;
+        this.gameGroup.remove(a.mesh);
+        a.mesh.geometry.dispose();
+        (a.mesh.material as THREE.Material).dispose();
         p.ammo = Math.min(16, p.ammo + 1);
         this.fx.sparks(a.x, 0.5, a.z, 0xf2b51c, 5, 3);
         audio.coin();
@@ -2554,7 +2588,8 @@ export class Game {
   private checkWaveProgress(dt: number): void {
     if (!this.level || this.state !== 'playing') return;
     if (this.boss) {
-      if (!this.boss.alive || this.boss.hp <= 0) return;
+      // covers a boss killed on the very frame the player died, then revived
+      if (!this.boss.alive || this.boss.hp <= 0) this.completeLevel();
       return;
     }
     const alive = this.enemies.filter((e) => e.alive).length;
@@ -2579,6 +2614,8 @@ export class Game {
 
   private completeLevel(): void {
     if (this.completionPending) return;
+    // a hit and the last kill can land in the same frame; dying wins, never "dead and won"
+    if (this.state !== 'playing') return;
     this.completionPending = true;
     this.state = 'won';
     this.stateTimer = 1.25;
@@ -2794,6 +2831,7 @@ export class Game {
   }
 
   private disposeLevel(): void {
+    this.releaseInputs();
     this.duelActive = false;
     this.duelLocalId = '';
     this.duelSnapshot = null;

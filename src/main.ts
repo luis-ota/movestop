@@ -630,6 +630,13 @@ window.addEventListener('pointermove', (e) => {
 
 window.addEventListener('pointerdown', () => audio.init(), { once: true });
 
+// Switching tabs/apps must not leave the campaign running (or keys "held") behind the user's back.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || duelActive) return;
+  game.releaseInputs();
+  if (game.getState() === 'playing') actions.pause();
+});
+
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__MOVESTOP__ = {
     game,
