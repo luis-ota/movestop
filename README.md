@@ -11,7 +11,7 @@ Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three
 
 MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de oito fases e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
 
-Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 60 testes automatizados do protocolo, combate, rounds, snapshots, abuso e política de proxy.
+Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 65 testes automatizados do protocolo, combate, rounds, snapshots, abuso e política de proxy.
 
 <p align="center">
   <img src="docs/assets/movestop-duel.jpg" alt="Duelo online do MOVESTOP no pátio de outono" width="720">
@@ -97,7 +97,7 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/ui/online.ts` / `src/online.css` — lobby, fila, HUD e resultado do duelo.
 - `src/multiplayer/` — transporte WebSocket e adaptador de input.
 - `server/` — servidor autoritativo, salas, validação e hardening.
-- `tests/` — 60 testes do protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+- `tests/` — 65 testes do protocolo, rounds, combate, snapshots, abuso e IP de proxy.
 
 ## Open source
 
