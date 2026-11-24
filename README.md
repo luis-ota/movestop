@@ -94,6 +94,7 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 MOVESTOP is released under the [MIT License](LICENSE). The project is currently created and maintained by [@luis-ota](https://github.com/luis-ota); a friend may help later, but no one else currently owns part of it.
 
 - [Contributing guide](CONTRIBUTING.md)
+- [Roadmap board](https://github.com/users/luis-ota/projects/1)
 - [Roadmap](ROADMAP.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security policy](SECURITY.md)

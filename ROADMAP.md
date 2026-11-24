@@ -2,6 +2,8 @@
 
 This is a living plan, not a promise of dates. The project is currently maintained by one person; a friend may help later. Issues and pull requests are welcome.
 
+Track progress on the public [MOVESTOP Roadmap board](https://github.com/users/luis-ota/projects/1).
+
 ## Online duel
 
 - [ ] Graceful deploys: drain active rooms before a restart and queue new connections during the swap.
