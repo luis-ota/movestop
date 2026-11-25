@@ -953,6 +953,39 @@ kbd {
   position: relative;
   animation: card-in 0.38s var(--ease);
 }
+.brief-scroll,
+.brief-actions { display: contents; }
+body.touch .briefing-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+body.touch .brief-scroll {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+body.touch .brief-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+body.touch .brief-actions .btn {
+  flex: 1 1 0;
+  min-height: 44px;
+}
+body.touch .brief-actions .brief-fullscreen {
+  width: auto;
+  flex-basis: auto;
+  margin: 0;
+}
 @keyframes card-in {
   from {
     opacity: 0;
@@ -3454,6 +3487,8 @@ body.touch .crosshair { display: none !important; }
   .brief-grid div { padding: 7px 9px; }
   .brief-char { margin-bottom: 8px; }
   body.touch .brief-touch { padding: 6px 0 2px; gap: 4px 12px; font-size: 8px; }
+  body.touch .brief-actions { margin-top: 6px; padding-top: 6px; gap: 8px; }
+  body.touch .brief-actions .btn { min-height: 40px; }
   .brief-hint { margin: 8px 0; font-size: 10px; }
   .briefing-card .btn.lg { min-height: 40px; }
 }

@@ -934,35 +934,39 @@ export class UI {
     }).join('');
     const el = this.screen('briefing');
     el.innerHTML = `<div class="briefing-card">
-      <div class="kicker">Fase ${String(level.id).padStart(2, '0')} · ${ACTS.find((a) => a.id === level.act)?.name ?? ''}</div>
-      <h2>${breaks(level.name)}</h2>
-      <p class="sub">${level.subtitle}</p>
-      <div class="brief-grid">
-        <div><span class="k">Munição</span><span class="v ${info.ammo === 0 ? 'red' : ''}">${info.ammo === 0 ? 'Sem balas' : `${info.ammo} balas`}</span></div>
-        <div><span class="k">Vida</span><span class="v">${info.maxHp}</span></div>
-        <div><span class="k">Ondas</span><span class="v">${info.waves}</span></div>
+      <div class="brief-scroll">
+        <div class="kicker">Fase ${String(level.id).padStart(2, '0')} · ${ACTS.find((a) => a.id === level.act)?.name ?? ''}</div>
+        <h2>${breaks(level.name)}</h2>
+        <p class="sub">${level.subtitle}</p>
+        <div class="brief-grid">
+          <div><span class="k">Munição</span><span class="v ${info.ammo === 0 ? 'red' : ''}">${info.ammo === 0 ? 'Sem balas' : `${info.ammo} balas`}</span></div>
+          <div><span class="k">Vida</span><span class="v">${info.maxHp}</span></div>
+          <div><span class="k">Ondas</span><span class="v">${info.waves}</span></div>
+        </div>
+        <div class="difficulty-picker" role="group" aria-label="Dificuldade">
+          <div class="difficulty-head"><span class="k">Dificuldade</span><em>${difficulty.description}</em></div>
+          <div class="difficulty-options">${difficultyOptions}</div>
+        </div>
+        <div class="brief-char"><span>Personagem</span><b>${info.character.name}</b><em>${info.character.perkDesc}</em></div>
+        <div class="brief-controls">
+          <span class="hint-row"><kbd>WASD</kbd> mover = tempo anda</span>
+          <span class="hint-row"><kbd>clique</kbd> atirar</span>
+          <span class="hint-row"><kbd>F</kbd> cortar</span>
+          <span class="hint-row"><kbd>dir.</kbd> aparar</span>
+          <span class="hint-row"><kbd>shift</kbd> dash</span>
+          <span class="hint-row"><kbd>R</kbd> iai</span>
+        </div>
+        <div class="brief-touch">
+          <span><b>Mover</b> joystick esquerdo</span>
+          <span><b>Mirar e atirar</b> arraste na direita</span>
+          <span><b>Ações</b> Cortar · Aparo · Dash · Iai</span>
+        </div>
+        <p class="brief-hint">${level.hint}</p>
       </div>
-      <div class="difficulty-picker" role="group" aria-label="Dificuldade">
-        <div class="difficulty-head"><span class="k">Dificuldade</span><em>${difficulty.description}</em></div>
-        <div class="difficulty-options">${difficultyOptions}</div>
-      </div>
-      <div class="brief-char"><span>Personagem</span><b>${info.character.name}</b><em>${info.character.perkDesc}</em></div>
-      <div class="brief-controls">
-        <span class="hint-row"><kbd>WASD</kbd> mover = tempo anda</span>
-        <span class="hint-row"><kbd>clique</kbd> atirar</span>
-        <span class="hint-row"><kbd>F</kbd> cortar</span>
-        <span class="hint-row"><kbd>dir.</kbd> aparar</span>
-        <span class="hint-row"><kbd>shift</kbd> dash</span>
-        <span class="hint-row"><kbd>R</kbd> iai</span>
-      </div>
-      <div class="brief-touch">
-        <span><b>Mover</b> joystick esquerdo</span>
-        <span><b>Mirar e atirar</b> arraste na direita</span>
-        <span><b>Ações</b> Cortar · Aparo · Dash · Iai</span>
+      <div class="brief-actions">
         <button class="btn ghost sm brief-fullscreen" type="button" data-action="fullscreen">Tela cheia · jogar deitado</button>
+        <button class="btn lg" data-action="begin">Entrar <span class="arr">→</span></button>
       </div>
-      <p class="brief-hint">${level.hint}</p>
-      <button class="btn lg" data-action="begin">Entrar <span class="arr">→</span></button>
     </div>`;
     this.activate('briefing');
   }
