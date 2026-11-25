@@ -447,7 +447,9 @@ class WeatherParticles {
               ? 0.25 + Math.random() * 0.4
               : this.mode === 'fireflies'
                 ? (Math.random() - 0.5) * 0.12
-                : -0.14 - Math.random() * 0.3,
+                : this.mode === 'petals' || this.mode === 'leaves'
+                  ? -0.85 - Math.random() * 0.9
+                  : -0.35 - Math.random() * 0.45,
         vz: (Math.random() - 0.5) * drift,
         spin: (Math.random() - 0.5) * (this.mode === 'rain' ? 0.1 : 2.4),
         angle: Math.random() * Math.PI * 2,

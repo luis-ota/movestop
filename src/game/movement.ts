@@ -18,6 +18,42 @@ export interface Point {
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
+/** Slab test; returns entry t in [0,1] or Infinity. */
+export function segAABB(
+  x0: number,
+  z0: number,
+  dx: number,
+  dz: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+): number {
+  let tmin = 0;
+  let tmax = 1;
+  if (Math.abs(dx) < 1e-9) {
+    if (x0 < minX || x0 > maxX) return Infinity;
+  } else {
+    let t1 = (minX - x0) / dx;
+    let t2 = (maxX - x0) / dx;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return Infinity;
+  }
+  if (Math.abs(dz) < 1e-9) {
+    if (z0 < minZ || z0 > maxZ) return Infinity;
+  } else {
+    let t1 = (minZ - z0) / dz;
+    let t2 = (maxZ - z0) / dz;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return Infinity;
+  }
+  return tmin;
+}
+
 /**
  * Pushes a circle out of every overlapping box. The deepest overlap is solved
  * first, so a flat wall face always wins over the corner of the neighbouring
@@ -109,6 +145,29 @@ export function inCone(ox: number, oz: number, angle: number, tx: number, tz: nu
   if (halfArc >= Math.PI) return true;
   if (Math.hypot(tx - ox, tz - oz) < 1e-6) return true;
   return angleDiff(Math.atan2(tx - ox, tz - oz), angle) <= halfArc;
+}
+
+/** True if a common projectile can be deflected by the player's current guard. */
+export function canParryBullet(
+  px: number,
+  pz: number,
+  angle: number,
+  bx: number,
+  bz: number,
+  bvx: number,
+  bvz: number,
+  radius: number,
+  contactX = bx,
+  contactZ = bz,
+): boolean {
+  const dx = bx - px;
+  const dz = bz - pz;
+  const dist = Math.hypot(contactX - px, contactZ - pz);
+  const speed = Math.hypot(bvx, bvz);
+  if (dist > radius || speed < 1e-6) return false;
+  // The projectile must still be travelling toward the player, not already past them.
+  if (Math.hypot(dx, dz) > 1e-4 && dx * bvx + dz * bvz >= 0) return false;
+  return inCone(px, pz, angle, bx, bz, Math.PI * 0.36);
 }
 
 /** Keyboard axes to a unit vector. Opposite keys cancel; diagonals are normalised. */

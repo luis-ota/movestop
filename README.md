@@ -11,7 +11,7 @@ Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three
 
 MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de oito fases e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
 
-Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 77 testes automatizados de movimento, combate, protocolo, rounds, snapshots, abuso e política de proxy.
+Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 85 testes automatizados de movimento, combate, dificuldade, protocolo, rounds, snapshots, abuso e política de proxy.
 
 <p align="center">
   <img src="docs/assets/movestop-duel.jpg" alt="Duelo online do MOVESTOP no pátio de outono" width="720">
@@ -39,8 +39,8 @@ bun run preview
 | Mover (e fazer o tempo andar) | `WASD` / setas |
 | Mirar | mouse |
 | Atirar | clique esquerdo / `Espaço` |
-| Cortar (combo de 3, reflete balas) | `F` |
-| Aparar / contra-golpe | clique direito / `E` / `Q` |
+| Cortar (combo de 3; finisher reflete uma bala) | `F` |
+| Aparar / refletir um projétil | clique direito / `E` / `Q` |
 | Dash | `Shift` |
 | Iai (golpe especial, foco cheio) | `R` |
 
@@ -53,11 +53,12 @@ Os controles aparecem só durante a partida, nos cantos, com fundo translúcido:
 - **Joystick esquerdo**: mover. O tempo anda enquanto você se move.
 - **Arraste na metade direita**: mirar e atirar. Um toque dispara uma bala; segurar mantém o fogo. O anel aparece onde o dedo toca.
 - **Cortar**: combo de katana.
-- **Aparo**: reflete balas; dois ou mais reflexos disparam um contra-golpe.
+- **Aparo**: janela curta em tempo real, cone frontal e um projétil por ação. Ataques pesados não são refletidos.
 - **Dash**.
 - **Iai**: acende quando o foco está cheio.
+- **Tela cheia**: disponível no briefing e no canto dos controles; tenta girar para paisagem em navegadores compatíveis.
 
-O HUD no celular mantém munição, vida, objetivo e tempo; radar e dicas de teclado ficam ocultos para não cobrir o campo. O briefing mostra a versão de toque dos controles.
+O HUD no celular mantém munição, vida, objetivo e tempo; radar e dicas de teclado ficam ocultos para não cobrir o campo. No iPhone, se a API não estiver disponível, adicione o site à Tela de Início e abra por lá.
 
 ## Dificuldade
 
@@ -65,7 +66,9 @@ A campanha tem três modos, escolhidos no briefing antes de entrar:
 
 - **Fácil:** mais vida e munição; inimigos mais lentos e menos frequentes.
 - **Difícil:** padrão recomendado; inimigos mais rápidos e agressivos. Escudos levam dois tiros ou um corte.
-- **Impossível:** inimigos resistentes, implacáveis e com menos munição.
+- **Impossível:** inimigos resistentes, implacáveis, com menos munição e invulnerabilidade curta; contato também machuca. O aparo é mais exigente.
+
+As novas ameaças da campanha incluem o **Artilheiro**, cujo círculo de impacto continua em tempo real, e o **Monge**, cujas placas congelam com o mundo. Pedras rachadas podem ser destruídas e deixar de proteger você.
 
 A escolha fica salva localmente e vale para a campanha. O duelo online continua com regras competitivas fixas.
 
@@ -97,7 +100,7 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/ui/online.ts` / `src/online.css` — lobby, fila, HUD e resultado do duelo.
 - `src/multiplayer/` — transporte WebSocket e adaptador de input.
 - `server/` — servidor autoritativo, salas, validação e hardening.
-- `tests/` — 77 testes de movimento, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+- `tests/` — 85 testes de movimento, dificuldade, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
 
 ## Open source
 

@@ -326,6 +326,23 @@ export class EnemyAvatar {
       const rimBot = voxel(0.86, 0.06, 0.09, accentMat, 0, 0.12, 0.36);
       this.group.add(plate, rimTop, rimBot);
     }
+    if (type === 'mortar') {
+      const helmet = voxel(0.66, 0.12, 0.58, this.darkMat, 0, 1.04, 0);
+      const cannon = voxel(0.22, 0.22, 0.68, gunMat, 0.24, 0.58, 0.42);
+      cannon.rotation.x = -0.18;
+      const tubeL = voxel(0.1, 0.42, 0.1, accentMat, -0.2, 0.68, -0.2);
+      const tubeR = voxel(0.1, 0.42, 0.1, accentMat, 0.2, 0.68, -0.2);
+      this.group.add(helmet, cannon, tubeL, tubeR);
+    }
+    if (type === 'warden') {
+      const hat = voxel(0.78, 0.08, 0.7, this.darkMat, 0, 1.09, 0);
+      const sleeveL = voxel(0.24, 0.34, 0.32, this.bodyMat, -0.35, 0.5, 0);
+      const sleeveR = voxel(0.24, 0.34, 0.32, this.bodyMat, 0.35, 0.5, 0);
+      const staff = voxel(0.055, 1.05, 0.055, gunMat, 0.4, 0.56, 0.18);
+      const talisman = voxel(0.13, 0.2, 0.025, accentMat, 0.46, 0.91, 0.2);
+      talisman.rotation.z = -0.12;
+      this.group.add(hat, sleeveL, sleeveR, staff, talisman);
+    }
 
     this.group.add(contactShadow(0.86));
     this.ring = new THREE.Mesh(

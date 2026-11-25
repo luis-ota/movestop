@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   analogMoveVector,
   angleDiff,
+  canParryBullet,
   capSpeed,
   inCone,
   keyMoveVector,
@@ -9,6 +10,7 @@ import {
   moveCircle,
   nextCombo,
   resolveCircle,
+  segAABB,
   type Box,
 } from '../src/game/movement';
 
@@ -41,7 +43,33 @@ describe('combo da katana', () => {
   });
 });
 
+describe('aparo', () => {
+  it('só deflete projétil comum à frente e ainda em aproximação', () => {
+    // player faces -Z; bullet comes from -Z toward +Z
+    expect(canParryBullet(0, 0, Math.PI, 0, -1, 0, 6, 1.8)).toBe(true);
+    expect(canParryBullet(0, 0, Math.PI, 0, 1, 0, -6, 1.8)).toBe(false);
+    expect(canParryBullet(0, 0, Math.PI, 0, -1, 0, -6, 1.8)).toBe(false);
+    expect(canParryBullet(0, 0, Math.PI, 0, -2.2, 0, 6, 1.8)).toBe(false);
+  });
+
+  it('tem cone frontal e não aceita projétil parado', () => {
+    expect(canParryBullet(0, 0, Math.PI, 1, -1, -1, 1, 1.8)).toBe(true);
+    expect(canParryBullet(0, 0, Math.PI, 1, 1, -1, -1, 1.8)).toBe(false);
+    expect(canParryBullet(0, 0, Math.PI, 0, -1, 0, 0, 1.8)).toBe(false);
+    // swept contact uses the impact point for range, but the previous position for facing
+    expect(canParryBullet(0, 0, Math.PI, 0, -2.2, 0, 6, 1.8, 0, 0)).toBe(true);
+    expect(canParryBullet(0, 0, Math.PI, 0, 2.2, 0, -6, 1.8, 0, 0)).toBe(false);
+  });
+});
+
 describe('colisão', () => {
+  it('detecta parede entre dois pontos e ignora linha livre', () => {
+    const box = wall(2, 0, 0.5);
+    expect(segAABB(0, 0, 4, 0, box.minX, box.maxX, box.minZ, box.maxZ)).toBeCloseTo(0.375, 6);
+    expect(segAABB(0, 2, 4, 0, box.minX, box.maxX, box.minZ, box.maxZ)).toBe(Infinity);
+    expect(segAABB(2, -2, 0, 4, box.minX, box.maxX, box.minZ, box.maxZ)).toBeCloseTo(0.375, 6);
+  });
+
   it('desliza ao longo de uma parede feita de várias células sem chute diagonal', () => {
     const boxes = [wall(0, 0), wall(1, 0), wall(2, 0), wall(3, 0)];
     const pos = { x: 0.3, z: -0.75 };

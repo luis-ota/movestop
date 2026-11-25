@@ -3352,6 +3352,16 @@ body.touch .crosshair { display: none !important; }
   box-shadow: 0 0 20px rgba(232, 201, 132, 0.32);
   animation: touchiaipulse 1.6s ease-in-out infinite;
 }
+.t-fullscreen {
+  right: 2px;
+  bottom: 142px;
+  width: 38px;
+  height: 38px;
+  color: rgba(243, 239, 228, 0.72);
+  background: rgba(13, 20, 18, 0.34);
+}
+.t-fullscreen svg { width: 18px; height: 18px; }
+.t-fullscreen.is-full { color: #ffe9b0; border-color: rgba(232, 201, 132, 0.7); }
 @keyframes touchiaipulse {
   50% { box-shadow: 0 0 30px rgba(232, 201, 132, 0.55); }
 }
@@ -3382,6 +3392,9 @@ body.touch .crosshair { display: none !important; }
   .hud-right .hud-stat { display: none; }
   .hud-right .icon-btn { width: 32px; height: 32px; }
   .hud-right .icon-btn svg { width: 15px; height: 15px; }
+  body.touch .hud-top {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
   .time-meter {
     position: fixed;
     left: 50%;
@@ -3398,19 +3411,61 @@ body.touch .crosshair { display: none !important; }
   .tm-bar { height: 2px; }
   .hud-bottom { justify-content: center; }
 }
-@media (pointer: coarse) and (max-height: 560px) {
-  .touch-stick { width: 104px; height: 104px; }
+@media (pointer: coarse) and (max-height: 560px), (pointer: coarse) and (orientation: landscape) {
+  .touch-stick {
+    left: calc(12px + env(safe-area-inset-left));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: 104px;
+    height: 104px;
+  }
   .stick-knob { width: 40px; height: 40px; margin: -20px; }
-  .touch-actions { width: 132px; height: 132px; }
+  .touch-actions {
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: 132px;
+    height: 132px;
+  }
   .t-slash { width: 58px; height: 58px; font-size: 10px; }
   .t-parry { width: 48px; height: 48px; right: 64px; }
   .t-dash { width: 46px; height: 46px; bottom: 64px; }
   .t-iai { width: 46px; height: 46px; right: 60px; bottom: 60px; }
-  .time-meter { top: 56px; width: 116px; }
+  .t-fullscreen { width: 34px; height: 34px; right: 0; bottom: 122px; }
+  .t-fullscreen svg { width: 16px; height: 16px; }
+  .time-meter { top: calc(54px + env(safe-area-inset-top)); width: 116px; }
   .ammo-card { min-width: 82px; padding: 5px 7px 6px; }
   .ammo-value { font-size: 26px; }
   .hud-objective { padding: 4px 8px; }
-  .touch-aim { top: 76px; }
+  .touch-aim { top: calc(54px + env(safe-area-inset-top)); bottom: 108px; width: 56%; }
+  .aim-hint { top: 43%; right: 16px; }
+}
+
+@media (pointer: coarse) and (orientation: landscape) {
+  body.touch .hud-objective { display: none; }
+  body.touch .hud-left { max-width: 58vw; }
+  body.touch .time-meter { top: calc(50px + env(safe-area-inset-top)); }
+  .briefing-card {
+    width: min(760px, 94vw);
+    max-height: calc(100dvh - 20px);
+    padding: 16px 20px;
+  }
+  .briefing-card h2 { font-size: 32px; margin: 8px 0; }
+  .briefing-card .sub { font-size: 11px; margin-bottom: 10px; }
+  .brief-grid { margin-bottom: 10px; }
+  .brief-grid div { padding: 7px 9px; }
+  .brief-char { margin-bottom: 8px; }
+  body.touch .brief-touch { padding: 6px 0 2px; gap: 4px 12px; font-size: 8px; }
+  .brief-hint { margin: 8px 0; font-size: 10px; }
+  .briefing-card .btn.lg { min-height: 40px; }
+}
+
+:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  background: var(--night);
+}
+@media (display-mode: fullscreen) {
+  .t-fullscreen,
+  .brief-fullscreen { display: none; }
 }
 
 @media (pointer: coarse) {
@@ -3449,6 +3504,13 @@ body.touch .brief-touch {
   line-height: 1.6;
 }
 .brief-touch b { color: var(--ink-soft); font-weight: 600; }
+.brief-fullscreen {
+  flex-basis: 100%;
+  justify-content: flex-start;
+  width: fit-content;
+  margin-top: 2px;
+  min-height: 34px;
+}
 
 .char-card .preview,
 .roster-grid .shop-card .preview {

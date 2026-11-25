@@ -24,6 +24,7 @@ import {
 } from './difficulty';
 import {
   analogMoveVector,
+  canParryBullet,
   capSpeed,
   inCone,
   keyMoveVector,
@@ -31,6 +32,7 @@ import {
   moveCircle,
   nextCombo,
   resolveCircle,
+  segAABB,
 } from './movement';
 import {
   DUEL_GRID,
@@ -114,8 +116,9 @@ interface Collider {
   minZ: number;
   maxZ: number;
   active: boolean;
-  kind: 'wall' | 'crate' | 'barrel' | 'boss';
+  kind: 'wall' | 'crate' | 'barrel' | 'boss' | 'rock';
   barrel?: Barrel;
+  rock?: DestructibleRock;
 }
 
 interface PlayerState {
@@ -140,6 +143,7 @@ interface PlayerState {
   parryCd: number;
   parryTime: number;
   parryMax: number;
+  parryRecovery: number;
   slashCd: number;
   slashCombo: number;
   slashWindow: number;
@@ -162,6 +166,11 @@ interface Enemy {
   avatar: EnemyAvatar;
   fireTimer: number;
   windup: number;
+  windupMax: number;
+  windupClock: 'world' | 'real';
+  attackKind: 'shot' | 'bash' | 'lunge' | 'mortar' | 'wards';
+  aimAngle: number;
+  bashRecovery: number;
   burstLeft: number;
   burstTimer: number;
   charge: number;
@@ -185,6 +194,7 @@ interface Bullet {
   owner: 'player' | 'enemy' | 'parried';
   fromBoss: boolean;
   fromEnemy: Enemy | null;
+  parryable: boolean;
   life: number;
   alive: boolean;
 }
@@ -214,6 +224,31 @@ interface Barrel {
   collider: Collider;
 }
 
+interface DestructibleRock {
+  x: number;
+  z: number;
+  mesh: THREE.Mesh;
+  hp: number;
+  maxHp: number;
+  collider: Collider;
+}
+
+interface GroundHazard {
+  kind: 'mortar' | 'ward';
+  x: number;
+  z: number;
+  radius: number;
+  age: number;
+  duration: number;
+  clock: 'world' | 'real';
+  armed: boolean;
+  active: boolean;
+  owner: Enemy | null;
+  mesh: THREE.Group;
+  disc: THREE.Mesh;
+  ring: THREE.Mesh;
+}
+
 interface Boss {
   x: number;
   z: number;
@@ -237,42 +272,6 @@ function angleLerp(a: number, b: number, t: number): number {
   let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
-}
-
-/** Slab test; returns entry t in [0,1] or Infinity. */
-function segAABB(
-  x0: number,
-  z0: number,
-  dx: number,
-  dz: number,
-  minX: number,
-  maxX: number,
-  minZ: number,
-  maxZ: number,
-): number {
-  let tmin = 0;
-  let tmax = 1;
-  if (Math.abs(dx) < 1e-9) {
-    if (x0 < minX || x0 > maxX) return Infinity;
-  } else {
-    let t1 = (minX - x0) / dx;
-    let t2 = (maxX - x0) / dx;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    tmin = Math.max(tmin, t1);
-    tmax = Math.min(tmax, t2);
-    if (tmin > tmax) return Infinity;
-  }
-  if (Math.abs(dz) < 1e-9) {
-    if (z0 < minZ || z0 > maxZ) return Infinity;
-  } else {
-    let t1 = (minZ - z0) / dz;
-    let t2 = (maxZ - z0) / dz;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    tmin = Math.max(tmin, t1);
-    tmax = Math.min(tmax, t2);
-    if (tmin > tmax) return Infinity;
-  }
-  return tmin;
 }
 
 function segPointT(x0: number, z0: number, dx: number, dz: number, px: number, pz: number): number {
@@ -332,6 +331,8 @@ export class Game {
   private coins: Coin[] = [];
   private ammoPickups: AmmoPickup[] = [];
   private barrels: Barrel[] = [];
+  private rocks: DestructibleRock[] = [];
+  private hazards: GroundHazard[] = [];
   private colliders: Collider[] = [];
   private boss: Boss | null = null;
   private fx: FX;
@@ -348,7 +349,6 @@ export class Game {
   private focus = 0;
   private slowmo = 0;
   private dashGhostTimer = 0;
-  private shotPulse = 0;
   private shake = 0;
   private stateTimer = 0;
   private hudTimer = 0;
@@ -467,6 +467,8 @@ export class Game {
 
     this.resizeHandler = () => this.onResize();
     window.addEventListener('resize', this.resizeHandler);
+    window.visualViewport?.addEventListener('resize', this.resizeHandler);
+    this.onResize();
     this.bindInput();
     this.loop();
   }
@@ -587,7 +589,6 @@ export class Game {
     this.focus = 0;
     this.slowmo = 0;
     this.dashGhostTimer = 0;
-    this.shotPulse = 0;
     this.shake = 0;
     this.boss = null;
     this.buildArena(level);
@@ -604,7 +605,7 @@ export class Game {
     );
     const parryRadius = 1.9 * (skin.parryMult ?? 1) * (upgrades.has('up-ukaeshi') ? 1.2 : 1);
     const dashMax = 1.5 * (skin.dashMult ?? 1) * (upgrades.has('up-hayai') ? 0.65 : 1);
-    const parryMax = 1.4 * (upgrades.has('up-ukaeshi') ? 0.6 : 1);
+    const parryMax = 1.8 * (upgrades.has('up-ukaeshi') ? 0.6 : 1);
 
     const spawn = this.findPlayerSpawn(level);
     const avatar = new PlayerAvatar(skin);
@@ -633,6 +634,7 @@ export class Game {
       parryCd: 0,
       parryTime: 0,
       parryMax,
+      parryRecovery: 0,
       slashCd: 0,
       slashCombo: 0,
       slashWindow: 0,
@@ -727,6 +729,7 @@ export class Game {
       parryCd: 0,
       parryTime: 0,
       parryMax: DUEL_RULES.parryCooldown,
+      parryRecovery: 0,
       parryRadius: DUEL_RULES.parryRadius,
       invuln: 0,
       moving: false,
@@ -1094,12 +1097,12 @@ export class Game {
     p.dashCd = 0;
     p.parryCd = 0;
     p.parryTime = 0;
+    p.parryRecovery = 0;
     p.slashCd = 0;
     p.slashWindow = 0;
     p.slashCombo = 0;
     p.specialCd = 0;
     p.dashTime = 0;
-    this.shotPulse = 0;
     this.slowmo = 0;
     this.touchFire = false;
     p.ammo = Math.max(p.ammo, this.level.ammo);
@@ -1107,6 +1110,7 @@ export class Game {
     p.avatar.group.rotation.x = 0;
     p.avatar.group.position.set(p.x, 0, p.z);
     this.clearBullets();
+    this.clearHazards();
     this.deathSent = false;
     this.state = 'playing';
     this.camSnap = true;
@@ -1145,13 +1149,15 @@ export class Game {
   }
 
   private onResize(): void {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const viewport = window.visualViewport;
+    const w = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
+    const h = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.lowQuality ? 1 : 1.75));
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
+    document.documentElement.style.setProperty('--viewport-height', `${h}px`);
   }
 
   private bindInput(): void {
@@ -1244,6 +1250,7 @@ export class Game {
     p.dashX = dx;
     p.dashZ = dz;
     p.dashCd = p.dashMax;
+    p.parryRecovery = 0;
     this.dashGhostTimer = 0;
     p.invuln = Math.max(p.invuln, 0.16);
     for (let i = 0; i < 3; i++) {
@@ -1278,7 +1285,6 @@ export class Game {
     this.spawnBullet(sx, sz, a, 17.5, 'player', 0x7ff7ef, this.loadout.trail.color, 1, false, null);
     this.fx.sparks(sx, 0.56, sz, this.loadout.trail.color, 4, 3.2);
     this.shake = Math.max(this.shake, 0.075);
-    this.shotPulse = 0.075;
     audio.shoot();
     this.emitHud();
   }
@@ -1305,21 +1311,47 @@ export class Game {
 
     let hits = 0;
     let cleared = 0;
+    let reflected = 0;
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (d > radius + e.def.radius) continue;
       if (!inCone(p.x, p.z, p.angle, e.x, e.z, halfArc)) continue;
-      this.killEnemy(e);
+      if (!this.hasLOS(p.x, p.z, e.x, e.z)) continue;
+      const slashDamage = e.type === 'shield' || finisher || dashing ? 2 : 1;
+      this.damageEnemy(e, slashDamage);
       hits++;
     }
     for (const b of this.bullets) {
       if (!b.alive || b.owner !== 'enemy') continue;
+      if (!(finisher || dashing) && cleared >= 3) break;
       const d = Math.hypot(b.x - p.x, b.z - p.z);
       if (d > radius + 0.2) continue;
       if (!inCone(p.x, p.z, p.angle, b.x, b.z, halfArc)) continue;
-      this.reflectBullet(b);
+      if (!this.hasLOS(p.x, p.z, b.x, b.z)) continue;
+      if (b.parryable && (finisher || dashing) && reflected < 1) {
+        this.reflectBullet(b);
+        reflected++;
+      } else {
+        this.removeBullet(b);
+      }
       cleared++;
+    }
+    for (const rock of this.rocks) {
+      if (!rock.collider.active) continue;
+      if (Math.hypot(rock.x - p.x, rock.z - p.z) > radius + 0.44) continue;
+      if (!inCone(p.x, p.z, p.angle, rock.x, rock.z, halfArc)) continue;
+      if (!this.hasLOS(p.x, p.z, rock.x, rock.z)) continue;
+      this.damageRock(rock, 2);
+      hits++;
+    }
+    for (const h of this.hazards) {
+      if (!h.active || h.kind !== 'ward') continue;
+      if (Math.hypot(h.x - p.x, h.z - p.z) > radius + 0.3) continue;
+      if (!inCone(p.x, p.z, p.angle, h.x, h.z, halfArc)) continue;
+      if (!this.hasLOS(p.x, p.z, h.x, h.z)) continue;
+      this.destroyHazard(h);
+      hits++;
     }
     if (this.boss && this.boss.alive) {
       const d = Math.hypot(this.boss.x - p.x, this.boss.z - p.z);
@@ -1331,12 +1363,12 @@ export class Game {
     for (const barrel of this.barrels) {
       if (!barrel.alive) continue;
       if (Math.hypot(barrel.x - p.x, barrel.z - p.z) >= radius) continue;
+      if (!this.hasLOS(p.x, p.z, barrel.x, barrel.z)) continue;
       if (inCone(p.x, p.z, p.angle, barrel.x, barrel.z, halfArc)) this.igniteBarrel(barrel);
     }
     if (hits > 0 || cleared > 0) {
       this.focus = Math.min(100, this.focus + hits * 7 + cleared * 4 + (dashing ? 5 : 0));
       this.shake = Math.max(this.shake, finisher ? 0.34 : 0.18);
-      this.shotPulse = 0.09;
       this.fx.sparks(p.x + Math.sin(p.angle) * 0.8, 0.6, p.z + Math.cos(p.angle) * 0.8, 0xfff1cf, 7, 4);
     }
     this.fx.slash(p.x, p.z, p.angle, this.loadout.skin.accent, radius, finisher);
@@ -1371,7 +1403,6 @@ export class Game {
     }
     this.slowmo = 0.5;
     this.shake = Math.max(this.shake, 0.9);
-    this.shotPulse = 0.35;
 
     const len = Math.hypot(toX - fromX, toZ - fromZ) || 1;
     const vx = (toX - fromX) / len;
@@ -1382,15 +1413,29 @@ export class Game {
     };
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      if (!this.hasLOS(fromX, fromZ, e.x, e.z)) continue;
       if (killNearLine(e.x, e.z) || Math.hypot(e.x - toX, e.z - toZ) < 2.2) this.killEnemy(e);
     }
-    if (this.boss && this.boss.alive && (killNearLine(this.boss.x, this.boss.z) || Math.hypot(this.boss.x - toX, this.boss.z - toZ) < 2.7)) {
+    if (this.boss && this.boss.alive && (killNearLine(this.boss.x, this.boss.z) || Math.hypot(this.boss.x - toX, this.boss.z - toZ) < 2.7) && this.hasLOS(fromX, fromZ, this.boss.x, this.boss.z)) {
       this.damageBoss();
       this.damageBoss();
     }
+    let reflected = 0;
     for (const b of this.bullets) {
-      if (!b.alive || b.owner !== 'enemy') continue;
-      if (killNearLine(b.x, b.z) || Math.hypot(b.x - toX, b.z - toZ) < 2.2) this.reflectBullet(b);
+      if (!b.alive || b.owner !== 'enemy' || !b.parryable) continue;
+      if (!this.hasLOS(fromX, fromZ, b.x, b.z)) continue;
+      if (reflected >= 2) break;
+      if (killNearLine(b.x, b.z) || Math.hypot(b.x - toX, b.z - toZ) < 2.2) {
+        this.reflectBullet(b);
+        reflected++;
+      }
+    }
+    for (const rock of this.rocks) {
+      if (rock.collider.active && killNearLine(rock.x, rock.z)) this.damageRock(rock, 99);
+    }
+    for (const h of this.hazards) {
+      if (!h.active || h.kind !== 'ward') continue;
+      if (killNearLine(h.x, h.z) || Math.hypot(h.x - toX, h.z - toZ) < 1.4) this.destroyHazard(h);
     }
     for (const barrel of this.barrels) {
       if (barrel.alive && killNearLine(barrel.x, barrel.z)) this.igniteBarrel(barrel);
@@ -1403,64 +1448,58 @@ export class Game {
     this.emitHud();
   }
 
-  private counterBurst(x: number, z: number): void {
-    let hits = 0;
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
-      if (Math.hypot(e.x - x, e.z - z) < 2.4) {
-        this.killEnemy(e);
-        hits++;
-      }
-    }
-    if (this.boss && this.boss.alive && Math.hypot(this.boss.x - x, this.boss.z - z) < 2.6) this.damageBoss();
-    this.fx.shock(x, z, 0xffd76a, 2.8);
-    this.fx.ring(x, z, 0x2ee6d0, 1.6, 0.45);
-    this.focus = Math.min(100, this.focus + 18);
-    this.shake = Math.max(this.shake, 0.42);
-    audio.perfect();
-    if (hits > 0) this.shotPulse = 0.14;
-  }
-
   private tryParry(): void {
     if (this.mode === 'duel') return;
     const p = this.player;
-    if (!p || this.state !== 'playing' || p.parryCd > 0) return;
+    if (!p || this.state !== 'playing' || p.parryCd > 0 || p.parryRecovery > 0) return;
     this.faceAim(p);
-    p.parryTime = 0.18;
+    p.parryTime = this.difficulty.parryWindow;
     p.parryCd = p.parryMax;
+    p.parryRecovery = this.difficulty.parryRecovery;
     p.avatar.pulseParry();
     this.fx.ring(p.x, p.z, 0x2ee6d0, p.parryRadius * 0.55, 0.22);
     audio.parry();
     this.emitHud();
   }
 
-  /** Reflects every enemy bullet inside the parry window. */
-  private parryNearby(dt: number): void {
+  /** One guard action can deflect exactly one common projectile. */
+  private parryNearby(): void {
     const p = this.player;
     if (!p || p.parryTime <= 0) return;
-    p.parryTime = Math.max(0, p.parryTime - dt);
-    let reflected = 0;
     for (const b of this.bullets) {
-      if (!b.alive || b.owner !== 'enemy') continue;
-      if (Math.hypot(b.x - p.x, b.z - p.z) <= p.parryRadius) {
-        this.reflectBullet(b);
-        reflected++;
-      }
-    }
-    if (reflected > 0) {
+      if (!b.alive || b.owner !== 'enemy' || !b.parryable) continue;
+      if (!canParryBullet(p.x, p.z, p.angle, b.x, b.z, b.vx, b.vz, p.parryRadius)) continue;
+      if (!this.hasLOS(p.x, p.z, b.x, b.z)) continue;
+      this.reflectBullet(b);
+      p.parryTime = 0;
+      p.parryRecovery = Math.min(p.parryRecovery, 0.1);
       this.fx.ring(p.x, p.z, 0x2ee6d0, p.parryRadius * 0.9, 0.36);
       this.fx.sparks(p.x, 0.7, p.z, 0xffd76a, 10, 5);
       this.shake = Math.max(this.shake, 0.14);
-      this.shotPulse = 0.13;
-      this.focus = Math.min(100, this.focus + 8 * reflected);
-      if (reflected >= 2) this.counterBurst(p.x, p.z);
+      this.focus = Math.min(100, this.focus + 6);
       this.emitHud();
+      return;
     }
+  }
+
+  /** Called before an enemy bullet applies damage, so a late-frame parry is not skipped. */
+  private tryParryBullet(b: Bullet, bx = b.x, bz = b.z): boolean {
+    const p = this.player;
+    if (!p || p.parryTime <= 0 || b.owner !== 'enemy' || !b.parryable) return false;
+    if (!canParryBullet(p.x, p.z, p.angle, b.x, b.z, b.vx, b.vz, p.parryRadius, bx, bz)) return false;
+    if (!this.hasLOS(p.x, p.z, bx, bz)) return false;
+    this.reflectBullet(b);
+    p.parryTime = 0;
+    p.parryRecovery = Math.min(p.parryRecovery, 0.1);
+    this.fx.ring(p.x, p.z, 0x2ee6d0, p.parryRadius, 0.3);
+    this.focus = Math.min(100, this.focus + 6);
+    this.emitHud();
+    return true;
   }
 
   private reflectBullet(b: Bullet): void {
     const p = this.player!;
-    const a = Math.atan2(p.aimX - p.x, p.aimZ - p.z);
+    const a = p.angle;
     b.vx = Math.sin(a) * 20;
     b.vz = Math.cos(a) * 20;
     b.owner = 'parried';
@@ -1490,6 +1529,7 @@ export class Game {
     size: number,
     fromBoss: boolean,
     fromEnemy: Enemy | null,
+    parryable = true,
   ): void {
     const mesh = makeBulletMesh(color, trail, size);
     mesh.position.set(x, 0.55, z);
@@ -1504,6 +1544,7 @@ export class Game {
       owner,
       fromBoss,
       fromEnemy,
+      parryable,
       life: 4,
       alive: true,
     });
@@ -1518,6 +1559,7 @@ export class Game {
 
     const crateCells: { row: number; col: number }[] = [];
     const barrelCells: { row: number; col: number }[] = [];
+    const rockCells: { row: number; col: number }[] = [];
     const coinCells: { row: number; col: number }[] = [];
     let playerSpawn: { row: number; col: number } | null = null;
 
@@ -1542,6 +1584,8 @@ export class Game {
           crateCells.push({ row: r, col: c });
         } else if (ch === 'b') {
           barrelCells.push({ row: r, col: c });
+        } else if (ch === 'R') {
+          rockCells.push({ row: r, col: c });
         } else if (ch === 'o') {
           coinCells.push({ row: r, col: c });
         } else if (ch === 'P') {
@@ -1601,6 +1645,14 @@ export class Game {
       const z = cell.row - this.halfH;
       if (nearCamera(x, z)) continue;
       this.createBarrel(x, z);
+    }
+
+    // cracked rocks: real cover that can be removed under pressure
+    for (const cell of rockCells) {
+      const x = cell.col - this.halfW;
+      const z = cell.row - this.halfH;
+      if (nearCamera(x, z)) continue;
+      this.createRock(x, z);
     }
 
     // fragments
@@ -1664,6 +1716,50 @@ export class Game {
     collider.barrel = barrel;
     this.barrels.push(barrel);
     this.colliders.push(collider);
+  }
+
+  private createRock(x: number, z: number): void {
+    const maxHp = this.loadout.difficulty === 'impossible' ? 3 : 2;
+    const mat = new THREE.MeshStandardMaterial({
+      color: getBiome(this.level!.id).id === 'snow' ? 0x9a9a93 : 0x68675f,
+      roughness: 0.96,
+      metalness: 0.02,
+      emissive: 0x000000,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.88, 1.05, 0.88), mat);
+    mesh.position.set(x, 0.52, z);
+    mesh.rotation.y = ((Math.round(x * 7 + z * 11) % 5) - 2) * 0.035;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.gameGroup.add(mesh);
+    const collider: Collider = {
+      minX: x - 0.44,
+      maxX: x + 0.44,
+      minZ: z - 0.44,
+      maxZ: z + 0.44,
+      active: true,
+      kind: 'rock',
+    };
+    const rock: DestructibleRock = { x, z, mesh, hp: maxHp, maxHp, collider };
+    collider.rock = rock;
+    this.rocks.push(rock);
+    this.colliders.push(collider);
+  }
+
+  private damageRock(rock: DestructibleRock, amount: number): void {
+    if (!rock.collider.active || amount <= 0) return;
+    rock.hp = Math.max(0, rock.hp - amount);
+    const mat = rock.mesh.material as THREE.MeshStandardMaterial;
+    mat.emissive.setHex(rock.hp > 0 ? 0x5b3b16 : 0x000000);
+    mat.emissiveIntensity = rock.hp > 0 ? 0.65 : 0;
+    this.fx.sparks(rock.x, 0.6, rock.z, 0xd8c8a4, 6, 3.5);
+    audio.impact();
+    if (rock.hp > 0) return;
+    rock.collider.active = false;
+    rock.mesh.visible = false;
+    this.fx.debris(rock.x, 0.55, rock.z, 0x77736a, 14, 4.8, 0.13);
+    this.fx.ring(rock.x, rock.z, 0xb7aa8e, 1.5, 0.4);
+    this.shake = Math.max(this.shake, 0.18);
   }
 
   private spawnBoss(level: LevelDef, x: number, z: number): void {
@@ -1778,6 +1874,11 @@ export class Game {
       avatar,
       fireTimer: 1.1 + Math.random() * 1.2,
       windup: 0,
+      windupMax: 0,
+      windupClock: 'world',
+      attackKind: 'shot',
+      aimAngle: Math.atan2((this.player?.x ?? 0) - x, (this.player?.z ?? 0) - z),
+      bashRecovery: 0,
       burstLeft: 0,
       burstTimer: 0,
       charge: 0,
@@ -1846,14 +1947,11 @@ export class Game {
       p.angle = angleLerp(p.angle, aimAngle, Math.min(1, dt * 22));
     }
 
-    // time scale
-    let baseTarget = p.moving || p.dashTime > 0 ? 1 : 0.04;
+    // The world genuinely stops when the player stops; committed hazards below are the exception.
+    let baseTarget = p.moving || p.dashTime > 0 ? 1 : 0;
     if (this.slowmo > 0) baseTarget = Math.min(baseTarget, 0.18);
     this.timeScale = damp(this.timeScale, baseTarget, 9, dt);
-    if (this.shotPulse > 0) {
-      this.shotPulse -= dt;
-      this.timeScale = Math.max(this.timeScale, 0.98);
-    }
+    if (this.timeScale < 0.005) this.timeScale = 0;
     const simDt = dt * this.timeScale;
     this.levelTime += simDt;
     audio.setIntensity(this.timeScale);
@@ -1862,6 +1960,8 @@ export class Game {
     p.fireCd = Math.max(0, p.fireCd - dt);
     p.dashCd = Math.max(0, p.dashCd - dt);
     p.parryCd = Math.max(0, p.parryCd - dt);
+    p.parryTime = Math.max(0, p.parryTime - dt);
+    p.parryRecovery = Math.max(0, p.parryRecovery - dt);
     p.slashCd = Math.max(0, p.slashCd - dt);
     p.slashWindow = Math.max(0, p.slashWindow - dt);
     p.specialCd = Math.max(0, p.specialCd - dt);
@@ -1882,8 +1982,9 @@ export class Game {
         p.vz = v.z;
       }
     } else {
-      p.vx = damp(p.vx, move.x * speed, 14, dt);
-      p.vz = damp(p.vz, move.z * speed, 14, dt);
+      const recoveryMove = p.parryRecovery > 0 ? 0.75 : 1;
+      p.vx = damp(p.vx, move.x * speed * recoveryMove, 14, dt);
+      p.vz = damp(p.vz, move.z * speed * recoveryMove, 14, dt);
     }
     this.movePlayer(p, p.vx * dt, p.vz * dt);
     p.avatar.group.position.set(p.x, 0, p.z);
@@ -1909,8 +2010,9 @@ export class Game {
     }
 
     this.updateEnemies(simDt, dt);
+    this.parryNearby();
+    this.updateHazards(dt, simDt);
     this.updateBullets(simDt);
-    this.parryNearby(simDt);
     this.updateBarrels(simDt);
     this.updateCoins(dt);
     this.updateAmmoPickups(dt);
@@ -1920,8 +2022,10 @@ export class Game {
 
     if (p.invuln <= 0) {
       for (const e of this.enemies) {
-        if (!e.alive || e.type !== 'hunter') continue;
-        if (Math.hypot(e.x - p.x, e.z - p.z) < 0.62) {
+        if (!e.alive) continue;
+        const contactRange = e.type === 'hunter' ? 0.62 : e.def.radius + Game.PLAYER_RADIUS;
+        if (!this.difficulty.contactDamage && e.type !== 'hunter') continue;
+        if (Math.hypot(e.x - p.x, e.z - p.z) < contactRange && this.hasLOS(e.x, e.z, p.x, p.z)) {
           this.hitPlayer();
           break;
         }
@@ -1982,11 +2086,11 @@ export class Game {
     }
   }
 
-  private hasLOS(x0: number, z0: number, x1: number, z1: number): boolean {
+  private hasLOS(x0: number, z0: number, x1: number, z1: number, ignore?: Collider): boolean {
     const dx = x1 - x0;
     const dz = z1 - z0;
     for (const c of this.colliders) {
-      if (!c.active || c.kind === 'boss') continue;
+      if (!c.active || c.kind === 'boss' || c === ignore) continue;
       const t = segAABB(x0, z0, dx, dz, c.minX, c.maxX, c.minZ, c.maxZ);
       if (t < 0.999) return false;
     }
@@ -2015,6 +2119,7 @@ export class Game {
       e.avatar.group.position.x = e.x;
       e.avatar.group.position.z = e.z;
       e.avatar.animate(realDt, this.timeScale);
+      e.bashRecovery = Math.max(0, e.bashRecovery - realDt);
       if (e.grace > 0) {
         e.grace -= simDt;
         e.avatar.setCharge(0);
@@ -2030,34 +2135,102 @@ export class Game {
       e.avatar.group.rotation.y = e.angle;
       const see = this.hasLOS(e.x, e.z, p.x, p.z) && dist < e.def.sightRange;
 
-      // movement
+      if (e.windup > 0) {
+        const windupDt = e.windupClock === 'real' ? realDt : simDt;
+        e.windup = Math.max(0, e.windup - windupDt);
+        e.charge = clamp(1 - e.windup / Math.max(0.01, e.windupMax), 0, 1);
+        e.avatar.setCharge(e.charge);
+        if (e.type === 'sniper' && e.laser && e.laserMat) {
+          e.laser.visible = true;
+          // The laser tracks for the first 70%, then promises one fixed line.
+          if (e.charge < 0.7) e.aimAngle = targetAngle;
+          const t = this.losEnd(e.x, e.z, e.x + Math.sin(e.aimAngle) * 30, e.z + Math.cos(e.aimAngle) * 30);
+          const ex = e.x + Math.sin(e.aimAngle) * 30 * t;
+          const ez = e.z + Math.cos(e.aimAngle) * 30 * t;
+          const pos = e.laser.geometry.getAttribute('position') as THREE.BufferAttribute;
+          pos.setXYZ(0, e.x, 1.02, e.z);
+          pos.setXYZ(1, ex, 0.6, ez);
+          pos.needsUpdate = true;
+          e.laserMat.opacity = 0.15 + e.charge * 0.8;
+        }
+        // Common shots and uncommitted melee can be denied by breaking sight.
+        if (!see && e.attackKind !== 'mortar') {
+          e.windup = 0;
+          e.charge = 0;
+          e.avatar.setCharge(0);
+          if (e.laser) e.laser.visible = false;
+          if (e.laserMat) e.laserMat.opacity = 0;
+          if (e.attackKind === 'shot') e.fireTimer += 0.5;
+          continue;
+        }
+        if (e.windup <= 0) {
+          if (e.attackKind === 'shot') {
+            this.enemyFire(e, dist);
+            e.burstLeft = e.def.burst - 1;
+            e.burstTimer = e.def.burstGap;
+          } else if (e.attackKind === 'bash') {
+            this.shieldBash(e, dist);
+          } else if (e.attackKind === 'lunge') {
+            e.lungeTime = 0.3;
+            e.lungeX = Math.sin(e.aimAngle);
+            e.lungeZ = Math.cos(e.aimAngle);
+            e.lungeCd = 1.7 * this.difficulty.enemyFireMult;
+            this.fx.ring(e.x, e.z, 0xff9a1f, 1.1, 0.3);
+            audio.slash(true);
+          } else if (e.attackKind === 'wards') {
+            this.placeWards(e);
+          }
+          if (e.laser) e.laser.visible = false;
+          if (e.laserMat) e.laserMat.opacity = 0;
+          e.fireTimer = (e.def.fireEvery / level.fireScale) * this.difficulty.enemyFireMult + Math.random() * 0.7;
+          e.avatar.setCharge(0);
+          e.charge = 0;
+        }
+        continue;
+      }
+
+      if (e.burstLeft > 0) {
+        e.burstTimer -= simDt;
+        if (e.burstTimer <= 0) {
+          this.enemyFire(e, dist);
+          e.burstLeft--;
+          e.burstTimer = e.def.burstGap;
+        }
+        continue;
+      }
+
+      // movement and attack commitment
       if (e.type === 'hunter') {
         e.lungeCd = Math.max(0, e.lungeCd - simDt);
         if (e.lungeTime > 0) {
           e.lungeTime -= simDt;
           this.moveEnemy(e, e.lungeX * 7.4 * this.difficulty.enemySpeedMult * simDt, e.lungeZ * 7.4 * this.difficulty.enemySpeedMult * simDt);
-          if (Math.hypot(e.x - p.x, e.z - p.z) < 0.62) {
-            this.hitPlayer();
-          }
-        } else if (e.lungeCd <= 0 && dist < 3.4) {
-          e.lungeTime = 0.3;
-          e.lungeCd = 1.7 * this.difficulty.enemyFireMult;
-          e.lungeX = dirX;
-          e.lungeZ = dirZ;
-          this.fx.ring(e.x, e.z, 0xff9a1f, 1.0, 0.3);
+          if (Math.hypot(e.x - p.x, e.z - p.z) < 0.62) this.hitPlayer();
+          e.avatar.setCharge(1);
+        } else if (e.lungeCd <= 0 && dist < 4.2) {
+          e.attackKind = 'lunge';
+          e.windupClock = 'real';
+          e.windup = 0.65 * Math.max(0.75, this.difficulty.enemyWindupMult);
+          e.windupMax = e.windup;
+          e.aimAngle = targetAngle;
+          e.charge = 0;
+          this.fx.ring(e.x, e.z, 0xff9a1f, 1.45, 0.5);
+          this.tryEnemySfx();
         } else {
-          this.seekEnemy(e, dirX, dirZ, e.def.moveSpeed, simDt);
+          this.seekEnemy(e, dirX, dirZ, e.def.moveSpeed * this.difficulty.enemySpeedMult, simDt);
+          e.avatar.setCharge(e.lungeCd < 0.45 ? 0.5 : 0);
         }
-      } else if (e.type === 'shield') {
-        if (dist > 1.9) {
+        continue;
+      }
+
+      if (e.type === 'shield') {
+        if (e.bashRecovery <= 0 && dist > 1.9) {
           const pace = (see ? e.def.moveSpeed : e.def.moveSpeed * 0.8) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
       } else if (e.type === 'sniper') {
-        if (!see && dist > 0.9) {
-          this.seekEnemy(e, dirX, dirZ, 0.46 * this.difficulty.enemySpeedMult, simDt);
-        }
-      } else if (e.type === 'gunner' || e.type === 'burster') {
+        if (!see && dist > 0.9) this.seekEnemy(e, dirX, dirZ, 0.46 * this.difficulty.enemySpeedMult, simDt);
+      } else if (e.type === 'gunner' || e.type === 'burster' || e.type === 'mortar' || e.type === 'warden') {
         if (see) {
           const perpX = dirZ;
           const perpZ = -dirX;
@@ -2075,63 +2248,179 @@ export class Game {
           const beforeX = e.x;
           const beforeZ = e.z;
           this.moveEnemy(e, mx * simDt, mz * simDt);
-          if (Math.abs(e.x - beforeX) < 1e-4 && Math.abs(e.z - beforeZ) < 1e-4) {
-            e.strafeDir *= -1;
-          }
+          if (Math.abs(e.x - beforeX) < 1e-4 && Math.abs(e.z - beforeZ) < 1e-4) e.strafeDir *= -1;
         } else {
-          // close the distance even when a rock sits between us
           const pace = (dist > 6 ? 0.55 : 0.34) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
       }
 
-      // firing
-      if (e.type === 'hunter') {
-        e.avatar.setCharge(e.lungeTime > 0 ? 1 : e.lungeCd < 0.45 ? 0.5 : 0);
+      e.fireTimer -= simDt;
+      if (!see || e.fireTimer > 0 || e.bashRecovery > 0) continue;
+      e.aimAngle = targetAngle;
+      if (e.type === 'shield' && dist < 2.25) {
+        e.attackKind = 'bash';
+        e.windupClock = 'real';
+        e.windup = 0.7 * Math.max(0.75, this.difficulty.enemyWindupMult);
+        e.windupMax = e.windup;
+        this.fx.ring(e.x, e.z, 0xff6a3d, 1.8, 0.55);
+        this.tryEnemySfx();
+      } else if (e.type === 'mortar') {
+        e.attackKind = 'mortar';
+        e.windupClock = 'real';
+        e.windup = e.def.windup * Math.max(0.8, this.difficulty.enemyWindupMult);
+        e.windupMax = e.windup;
+        this.createMortarHazard(e);
+        this.tryEnemySfx();
+      } else if (e.type === 'warden') {
+        e.attackKind = 'wards';
+        e.windupClock = 'world';
+        e.windup = e.def.windup * windupMult;
+        e.windupMax = e.windup;
+        this.tryEnemySfx();
+      } else {
+        e.attackKind = 'shot';
+        e.windupClock = 'world';
+        e.windup = e.def.windup * windupMult;
+        e.windupMax = e.windup;
+        if (e.type === 'sniper') this.tryEnemySfx(0.1);
+      }
+      e.charge = 0;
+    }
+  }
+
+  private shieldBash(e: Enemy, dist: number): void {
+    const p = this.player!;
+    e.bashRecovery = 0.5;
+    this.fx.slash(e.x, e.z, e.aimAngle, 0xff6a3d, 1.9, false);
+    audio.slash(true);
+    this.shake = Math.max(this.shake, 0.2);
+    if (dist < 2.35 && inCone(e.x, e.z, e.aimAngle, p.x, p.z, 1.05) && this.hasLOS(e.x, e.z, p.x, p.z)) {
+      this.hitPlayer();
+    }
+  }
+
+  private createMortarHazard(e: Enemy): void {
+    const p = this.player!;
+    const x = p.x + p.vx * e.def.lead;
+    const z = p.z + p.vz * e.def.lead;
+    const target = { x, z };
+    resolveCircle(target, 0.16, this.colliders);
+    this.createHazard('mortar', target.x, target.z, 1.3, 0.95, 'real', e);
+    this.fx.ring(target.x, target.z, 0xff8a24, 1.3, 0.45);
+    audio.enemyShoot();
+  }
+
+  private placeWards(e: Enemy): void {
+    const p = this.player!;
+    const angle = Math.atan2(p.x - e.x, p.z - e.z);
+    for (let i = 1; i <= 3; i++) {
+      const distance = i * 1.8;
+      const x = e.x + Math.sin(angle) * distance;
+      const z = e.z + Math.cos(angle) * distance;
+      if (distance > 8 || !this.hasLOS(e.x, e.z, x, z)) break;
+      this.createHazard('ward', x, z, 1.05, 0.28, 'world', e);
+    }
+    audio.enemyShoot();
+  }
+
+  private createHazard(
+    kind: GroundHazard['kind'],
+    x: number,
+    z: number,
+    radius: number,
+    duration: number,
+    clock: GroundHazard['clock'],
+    owner: Enemy | null,
+  ): void {
+    const color = kind === 'mortar' ? 0xff6a2c : 0xe8d7a1;
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(radius, 40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.035;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.88, radius, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.045;
+    group.add(disc, ring);
+    this.gameGroup.add(group);
+    this.hazards.push({ kind, x, z, radius, age: 0, duration, clock, armed: kind === 'mortar', active: true, owner, mesh: group, disc, ring });
+  }
+
+  private updateHazards(realDt: number, simDt: number): void {
+    const p = this.player!;
+    for (const h of this.hazards) {
+      if (!h.active) continue;
+      if (h.kind === 'ward' && !h.armed) {
+        if (Math.hypot(p.x - h.x, p.z - h.z) < h.radius * 0.7 && this.hasLOS(h.x, h.z, p.x, p.z)) {
+          h.armed = true;
+          this.fx.ring(h.x, h.z, 0xe8d7a1, h.radius, 0.25);
+          audio.parry();
+        }
+      }
+      if (!h.armed) {
+        (h.ring.material as THREE.MeshBasicMaterial).opacity = 0.42 + Math.sin(this.realTime * 5 + h.x) * 0.12;
         continue;
       }
-
-      if (e.windup > 0) {
-        e.windup -= simDt;
-        e.charge = clamp(1 - e.windup / (e.def.windup * windupMult), 0, 1);
-        e.avatar.setCharge(e.charge);
-        if (e.type === 'sniper' && e.laser && e.laserMat) {
-          e.laser.visible = true;
-          const t = this.losEnd(e.x, e.z, p.x, p.z);
-          const ex = e.x + (p.x - e.x) * t;
-          const ez = e.z + (p.z - e.z) * t;
-          const pos = e.laser.geometry.getAttribute('position') as THREE.BufferAttribute;
-          pos.setXYZ(0, e.x, 1.02, e.z);
-          pos.setXYZ(1, ex, 0.6, ez);
-          pos.needsUpdate = true;
-          e.laserMat.opacity = 0.15 + e.charge * 0.8;
-        }
-        if (e.windup <= 0) {
-          this.enemyFire(e, dist);
-          e.burstLeft = e.def.burst - 1;
-          e.burstTimer = e.def.burstGap;
-          if (e.laser) e.laser!.visible = false;
-          if (e.laserMat) e.laserMat.opacity = 0;
-          e.fireTimer = (e.def.fireEvery / level.fireScale) * this.difficulty.enemyFireMult + Math.random() * 0.7;
-          e.avatar.setCharge(0);
-          e.charge = 0;
-        }
-      } else if (e.burstLeft > 0) {
-        e.burstTimer -= simDt;
-        if (e.burstTimer <= 0) {
-          this.enemyFire(e, dist);
-          e.burstLeft--;
-          e.burstTimer = e.def.burstGap;
-        }
-      } else {
-        e.fireTimer -= simDt;
-        if (see && e.fireTimer <= 0) {
-          e.windup = e.def.windup * windupMult;
-          e.charge = 0;
-          if (e.type === 'sniper') this.tryEnemySfx(0.1);
-        }
-      }
+      h.age += h.clock === 'real' ? realDt : simDt;
+      const t = clamp(h.age / h.duration, 0, 1);
+      (h.disc.material as THREE.MeshBasicMaterial).opacity = 0.1 + t * 0.24;
+      (h.ring.material as THREE.MeshBasicMaterial).opacity = 0.55 + t * 0.45;
+      h.ring.scale.setScalar(0.94 + t * 0.08);
+      if (h.age < h.duration) continue;
+      h.active = false;
+      this.explodeHazard(h);
+      this.removeHazard(h);
     }
+    if (this.hazards.some((h) => !h.active)) this.hazards = this.hazards.filter((h) => h.active);
+  }
+
+  private explodeHazard(h: GroundHazard): void {
+    const p = this.player!;
+    const color = h.kind === 'mortar' ? 0xff6a2c : 0xe8d7a1;
+    this.fx.shock(h.x, h.z, color, h.kind === 'mortar' ? h.radius * 1.8 : h.radius * 1.35);
+    this.shake = Math.max(this.shake, h.kind === 'mortar' ? 0.38 : 0.2);
+    audio.hit();
+    if (Math.hypot(p.x - h.x, p.z - h.z) < h.radius && this.hasLOS(h.x, h.z, p.x, p.z)) this.hitPlayer();
+    for (const e of this.enemies) {
+      if (!e.alive || Math.hypot(e.x - h.x, e.z - h.z) >= h.radius) continue;
+      if (!this.hasLOS(h.x, h.z, e.x, e.z)) continue;
+      this.damageEnemy(e, h.kind === 'mortar' ? 2 : 1);
+    }
+    for (const barrel of this.barrels) {
+      if (barrel.alive && Math.hypot(barrel.x - h.x, barrel.z - h.z) < h.radius * 1.25) this.igniteBarrel(barrel);
+    }
+    for (const rock of this.rocks) {
+      if (Math.hypot(rock.x - h.x, rock.z - h.z) < h.radius * 1.15) this.damageRock(rock, 99);
+    }
+  }
+
+  private destroyHazard(h: GroundHazard): void {
+    if (!h.active) return;
+    h.active = false;
+    this.removeHazard(h);
+    this.fx.sparks(h.x, 0.45, h.z, 0xffe4a8, 8, 4);
+    this.fx.ring(h.x, h.z, 0xffe4a8, h.radius * 0.7, 0.25);
+    this.focus = Math.min(100, this.focus + 2);
+  }
+
+  private removeHazard(h: GroundHazard): void {
+    this.gameGroup.remove(h.mesh);
+    h.disc.geometry.dispose();
+    (h.disc.material as THREE.Material).dispose();
+    h.ring.geometry.dispose();
+    (h.ring.material as THREE.Material).dispose();
+  }
+
+  private clearHazards(): void {
+    for (const h of this.hazards) if (h.active) this.removeHazard(h);
+    this.hazards = [];
   }
 
   private tryEnemySfx(pitch = 0): void {
@@ -2146,7 +2435,7 @@ export class Game {
     const lead = e.def.lead;
     const tx = p.x + p.vx * lead;
     const tz = p.z + p.vz * lead;
-    let angle = Math.atan2(tx - e.x, tz - e.z);
+    let angle = e.type === 'sniper' ? e.aimAngle : Math.atan2(tx - e.x, tz - e.z);
     angle += (Math.random() - 0.5) * e.def.spread * 2;
     const speed = e.def.bulletSpeed * level.speedScale * this.difficulty.enemyBulletSpeedMult;
     const sx = e.x + Math.sin(angle) * 0.52;
@@ -2193,6 +2482,19 @@ export class Game {
       // entities before the wall
       let hitSomething = false;
       if (b.owner === 'player' || b.owner === 'parried') {
+        for (const h of this.hazards) {
+          if (!h.active || h.kind !== 'ward') continue;
+          const t = segPointT(x0, z0, dx, dz, h.x, h.z);
+          if (t > wallT) continue;
+          const hx = x0 + dx * t;
+          const hz = z0 + dz * t;
+          if (Math.hypot(hx - h.x, hz - h.z) > 0.34) continue;
+          this.destroyHazard(h);
+          this.removeBullet(b);
+          hitSomething = true;
+          break;
+        }
+        if (hitSomething) continue;
         for (const e of this.enemies) {
           if (!e.alive) continue;
           const t = segPointT(x0, z0, dx, dz, e.x, e.z);
@@ -2251,8 +2553,8 @@ export class Game {
           if (t <= wallT) {
             const px = x0 + dx * t;
             const pz = z0 + dz * t;
-            if (Math.hypot(px - p.x, pz - p.z) < 0.34 && p.invuln <= 0) {
-              this.hitPlayer();
+            if (Math.hypot(px - p.x, pz - p.z) < 0.34) {
+              if (p.invuln <= 0 && !this.tryParryBullet(b, px, pz)) this.hitPlayer();
               this.removeBullet(b);
               hitSomething = true;
             }
@@ -2266,6 +2568,8 @@ export class Game {
         const pz = z0 + dz * wallT;
         if (wallHit.kind === 'barrel' && wallHit.barrel && wallHit.barrel.alive) {
           this.igniteBarrel(wallHit.barrel);
+        } else if (wallHit.kind === 'rock' && wallHit.rock) {
+          this.damageRock(wallHit.rock, 1);
         } else {
           this.fx.sparks(px, 0.55, pz, b.owner === 'enemy' ? 0xff6a4d : this.loadout.trail.color, 3, 2.2);
         }
@@ -2327,12 +2631,8 @@ export class Game {
       e.laserMat?.dispose();
       e.laser = null;
     }
-    if (!this.level?.noAmmoDrops && (Math.random() < 0.34 * this.difficulty.ammoDropMult || e.type === 'shield' || this.level?.boss)) {
+    if (!this.level?.noAmmoDrops && (Math.random() < 0.34 * this.difficulty.ammoDropMult || e.type === 'shield' || e.type === 'mortar' || e.type === 'warden' || this.level?.boss)) {
       this.dropAmmo(e.x, e.z);
-    }
-    if (this.player) {
-      const d = Math.hypot(e.x - this.player.x, e.z - this.player.z);
-      if (d < 1.4) this.shotPulse = Math.max(this.shotPulse, 0.05);
     }
   }
 
@@ -2342,7 +2642,7 @@ export class Game {
     this.events.onPlayerHit();
     if (p.hp > 1) {
       p.hp -= 1;
-      p.invuln = 1.5;
+      p.invuln = this.difficulty.invulnTime;
       this.shake = Math.max(this.shake, 0.42);
       this.fx.shock(p.x, p.z, 0xff3b2e, 1.8);
       audio.hit();
@@ -2386,7 +2686,7 @@ export class Game {
     boss.avatar.group.rotation.y = boss.angle;
 
     if (boss.windup > 0) {
-      boss.windup -= simDt;
+      boss.windup -= dt;
       boss.avatar.setCharge(clamp(1 - boss.windup / 0.85, 0, 1));
       if (boss.windup <= 0) {
         this.bossFire(boss);
@@ -2396,7 +2696,7 @@ export class Game {
       return;
     }
 
-    boss.cooldown -= simDt;
+    boss.cooldown -= dt;
     if (boss.cooldown <= 0) {
       boss.windup = 0.85;
       this.fx.ring(boss.x, boss.z, 0xff3b2e, 2.4, 0.5);
@@ -2409,11 +2709,12 @@ export class Game {
     const radialCount = phase === 1 ? 12 : phase === 2 ? 16 : 20;
     const radialSpeed = phase === 1 ? 4.1 : phase === 2 ? 4.5 : 4.9;
     const offset = Math.random() * Math.PI * 2;
+    const parryable = phase === 1;
     for (let i = 0; i < radialCount; i++) {
       const a = offset + (i / radialCount) * Math.PI * 2;
       const sx = boss.x + Math.sin(a) * 1.25;
       const sz = boss.z + Math.cos(a) * 1.25;
-      this.spawnBullet(sx, sz, a, radialSpeed, 'enemy', 0xff3b2e, 0xff5a3c, 1.05, true, null);
+      this.spawnBullet(sx, sz, a, radialSpeed, 'enemy', parryable ? 0xff3b2e : 0xff8a24, parryable ? 0xff5a3c : 0xffb347, parryable ? 1.05 : 1.3, true, null, parryable);
     }
     const aimed = phase === 1 ? 3 : phase === 2 ? 4 : 5;
     const baseAngle = Math.atan2(p.x - boss.x, p.z - boss.z);
@@ -2422,7 +2723,7 @@ export class Game {
       const a = baseAngle + spread;
       const sx = boss.x + Math.sin(a) * 1.15;
       const sz = boss.z + Math.cos(a) * 1.15;
-      this.spawnBullet(sx, sz, a, 7.6, 'enemy', 0xff2e46, 0xff2e46, 1.1, true, null);
+      this.spawnBullet(sx, sz, a, 7.6, 'enemy', parryable ? 0xff2e46 : 0xff8a24, parryable ? 0xff2e46 : 0xffb347, parryable ? 1.1 : 1.3, true, null, parryable);
     }
     this.fx.sparks(boss.x, 2.6, boss.z, 0xffb02e, 22, 7);
     this.fx.ring(boss.x, boss.z, 0xffb02e, 2.6, 0.45);
@@ -2489,10 +2790,10 @@ export class Game {
     const radius = 2.05;
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      if (Math.hypot(e.x - b.x, e.z - b.z) <= radius) this.killEnemy(e);
+      if (Math.hypot(e.x - b.x, e.z - b.z) <= radius && this.hasLOS(b.x, b.z, e.x, e.z, b.collider)) this.killEnemy(e);
     }
     if (this.player && this.player.invuln <= 0) {
-      if (Math.hypot(this.player.x - b.x, this.player.z - b.z) <= radius * 0.92) this.hitPlayer();
+      if (Math.hypot(this.player.x - b.x, this.player.z - b.z) <= radius * 0.92 && this.hasLOS(b.x, b.z, this.player.x, this.player.z, b.collider)) this.hitPlayer();
     }
     for (const other of this.barrels) {
       if (other.alive && other !== b && Math.hypot(other.x - b.x, other.z - b.z) <= radius + 0.4) {
@@ -2837,6 +3138,8 @@ export class Game {
     this.coins = [];
     this.ammoPickups = [];
     this.barrels = [];
+    this.rocks = [];
+    this.clearHazards();
     this.enemies = [];
     this.colliders = [];
     this.boss = null;
@@ -2878,6 +3181,7 @@ export class Game {
   dispose(): void {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.resizeHandler);
+    window.visualViewport?.removeEventListener('resize', this.resizeHandler);
     this.disposeLevel();
     this.menuLandscape?.dispose();
     this.menuLandscape = null;

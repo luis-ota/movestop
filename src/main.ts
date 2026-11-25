@@ -58,6 +58,58 @@ function setDifficulty(value: Difficulty): void {
   }
 }
 
+async function toggleFullscreen(): Promise<void> {
+  const root = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => void;
+  };
+  const doc = document as Document & {
+    webkitFullscreenElement?: Element | null;
+    webkitExitFullscreen?: () => void;
+  };
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+  try {
+    if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+      if (doc.exitFullscreen) await doc.exitFullscreen();
+      else doc.webkitExitFullscreen?.();
+      return;
+    }
+    if (!root.requestFullscreen && isIOS) {
+      ui.toast('No iPhone, adicione à Tela de Início e abra por lá para jogar em tela cheia.', true);
+      return;
+    }
+    if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    else {
+      ui.toast('Use o menu do navegador para ativar tela cheia e gire o celular.', true);
+      return;
+    }
+
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: 'landscape') => Promise<void>;
+    };
+    try {
+      await orientation.lock?.('landscape');
+    } catch {
+      /* iOS and some browsers do not expose orientation locking. */
+    }
+  } catch {
+    ui.toast('Não foi possível ativar a tela cheia. Use o menu do navegador e gire o celular.', true);
+  }
+}
+
+function syncFullscreenButton(): void {
+  const doc = document as Document & { webkitFullscreenElement?: Element | null };
+  const full = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+  document.querySelectorAll<HTMLElement>('[data-touch="fullscreen"]').forEach((button) => {
+    button.setAttribute('aria-label', full ? 'Sair da tela cheia' : 'Tela cheia');
+    button.classList.toggle('is-full', full);
+  });
+}
+
+document.addEventListener('fullscreenchange', syncFullscreenButton);
+document.addEventListener('webkitfullscreenchange', syncFullscreenButton);
+
 let ui!: UI;
 let game!: Game;
 
@@ -178,6 +230,7 @@ const actions: UIActions = {
     else game.inputSpecial();
   },
   online: () => openOnline(),
+  fullscreen: () => toggleFullscreen(),
 };
 
 ui = new UI(uiRoot, () => save, actions);

@@ -76,6 +76,7 @@ export interface UIActions {
   touchDash: () => void;
   touchSpecial: () => void;
   online: () => void;
+  fullscreen: () => void;
 }
 
 const coin = '<i class="coin-glyph"></i>';
@@ -108,6 +109,7 @@ const ICONS = {
   dash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M3 7h9M3 12h7M3 17h9M14 7l7 5-7 5"/></svg>`,
   ammo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="3" width="4" height="14"/><path d="M7 17h4v4H7zM15 8h3v9h-3z"/></svg>`,
   parry: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 19L17 7l2-4 1 1 1 1-4 2L7 19H5z"/><path d="M4 21h6"/></svg>`,
+  fullscreen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/></svg>`,
 };
 
 function upgradeIcon(name: string): string {
@@ -285,6 +287,7 @@ export class UI {
           <button class="touch-btn t-iai" data-touch="special" aria-label="Iai">Iai</button>
           <button class="touch-btn t-slash" data-touch="slash" aria-label="Cortar">Cortar</button>
           <button class="touch-btn t-parry" data-touch="parry" aria-label="Aparar">Aparo</button>
+          <button class="touch-btn t-fullscreen" data-touch="fullscreen" aria-label="Tela cheia">${ICONS.fullscreen}</button>
         </div>
       </div>
       <div class="desktop-note" id="desktop-note">
@@ -341,6 +344,9 @@ export class UI {
         break;
       case 'online':
         this.actions.online();
+        break;
+      case 'fullscreen':
+        this.actions.fullscreen();
         break;
       case 'menu':
         this.actions.quitToMenu();
@@ -562,6 +568,7 @@ export class UI {
         else if (action === 'parry') this.actions.touchParry();
         else if (action === 'dash') this.actions.touchDash();
         else if (action === 'special') this.actions.touchSpecial();
+        else if (action === 'fullscreen') this.actions.fullscreen();
       };
       btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -952,6 +959,7 @@ export class UI {
         <span><b>Mover</b> joystick esquerdo</span>
         <span><b>Mirar e atirar</b> arraste na direita</span>
         <span><b>Ações</b> Cortar · Aparo · Dash · Iai</span>
+        <button class="btn ghost sm brief-fullscreen" type="button" data-action="fullscreen">Tela cheia · jogar deitado</button>
       </div>
       <p class="brief-hint">${level.hint}</p>
       <button class="btn lg" data-action="begin">Entrar <span class="arr">→</span></button>

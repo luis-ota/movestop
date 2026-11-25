@@ -12,7 +12,11 @@ export interface DifficultyDef {
   enemyWindupMult: number;
   enemyBulletSpeedMult: number;
   enemyHpBonus: number;
+  contactDamage: boolean;
   playerHpBonus: number;
+  invulnTime: number;
+  parryWindow: number;
+  parryRecovery: number;
   ammoBonus: number;
   ammoDropMult: number;
   bossHpMult: number;
@@ -29,7 +33,11 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     enemyWindupMult: 1.15,
     enemyBulletSpeedMult: 0.9,
     enemyHpBonus: 0,
+    contactDamage: false,
     playerHpBonus: 1,
+    invulnTime: 2,
+    parryWindow: 0.2,
+    parryRecovery: 0.14,
     ammoBonus: 2,
     ammoDropMult: 1.4,
     bossHpMult: 0.85,
@@ -44,7 +52,11 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     enemyWindupMult: 0.88,
     enemyBulletSpeedMult: 1.05,
     enemyHpBonus: 0,
+    contactDamage: false,
     playerHpBonus: 0,
+    invulnTime: 1.25,
+    parryWindow: 0.16,
+    parryRecovery: 0.22,
     ammoBonus: 0,
     ammoDropMult: 0.9,
     bossHpMult: 1.15,
@@ -53,16 +65,20 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     id: 'impossible',
     label: 'Impossível',
     short: 'Sem tempo para errar',
-    description: 'Inimigos resistentes, implacáveis e com menos munição disponível.',
-    enemySpeedMult: 1.32,
-    enemyFireMult: 0.58,
-    enemyWindupMult: 0.72,
-    enemyBulletSpeedMult: 1.15,
-    enemyHpBonus: 1,
+    description: 'Inimigos resistentes, implacáveis e com munição escassa. Cada erro cobra caro.',
+    enemySpeedMult: 1.5,
+    enemyFireMult: 0.42,
+    enemyWindupMult: 0.6,
+    enemyBulletSpeedMult: 1.3,
+    enemyHpBonus: 2,
+    contactDamage: true,
     playerHpBonus: 0,
-    ammoBonus: -1,
-    ammoDropMult: 0.55,
-    bossHpMult: 1.35,
+    invulnTime: 0.75,
+    parryWindow: 0.13,
+    parryRecovery: 0.28,
+    ammoBonus: -2,
+    ammoDropMult: 0.25,
+    bossHpMult: 1.6,
   },
 };
 
@@ -77,8 +93,9 @@ export function getDifficulty(value: Difficulty | undefined): DifficultyDef {
 }
 
 export function enemyHpFor(type: EnemyType, difficulty: Difficulty): number {
-  const base = type === 'shield' ? 2 : 1;
-  return base + (type === 'shield' ? 0 : getDifficulty(difficulty).enemyHpBonus);
+  const base = type === 'shield' ? 2 : type === 'mortar' || type === 'warden' ? 2 : 1;
+  if (type === 'shield') return base;
+  return base + getDifficulty(difficulty).enemyHpBonus;
 }
 
 export function playerMaxHpFor(base: number, difficulty: Difficulty): number {

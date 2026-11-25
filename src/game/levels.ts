@@ -1,4 +1,4 @@
-export type EnemyType = 'gunner' | 'burster' | 'sniper' | 'shield' | 'hunter';
+export type EnemyType = 'gunner' | 'burster' | 'sniper' | 'shield' | 'hunter' | 'mortar' | 'warden';
 
 export interface EnemyDef {
   type: EnemyType;
@@ -115,6 +115,44 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xff9a1f,
     body: 0xcc5f0e,
     scale: 0.92,
+  },
+  mortar: {
+    type: 'mortar',
+    label: 'ARTILHEIRO',
+    hp: 2,
+    radius: 0.42,
+    fireEvery: 3.1,
+    windup: 0.55,
+    bulletSpeed: 0,
+    lead: 0.22,
+    burst: 0,
+    burstGap: 0,
+    spread: 0,
+    moveSpeed: 0.25,
+    strafe: 0.18,
+    sightRange: 24,
+    color: 0xffb347,
+    body: 0x665b4c,
+    scale: 1.08,
+  },
+  warden: {
+    type: 'warden',
+    label: 'MONGE',
+    hp: 2,
+    radius: 0.36,
+    fireEvery: 3.6,
+    windup: 0.7,
+    bulletSpeed: 0,
+    lead: 0,
+    burst: 0,
+    burstGap: 0,
+    spread: 0,
+    moveSpeed: 0.34,
+    strafe: 0.16,
+    sightRange: 24,
+    color: 0xe8dcc0,
+    body: 0x77776d,
+    scale: 0.98,
   },
 };
 
@@ -298,7 +336,7 @@ export const LEVELS: LevelDef[] = [
     reward: 240,
     fireScale: 1,
     speedScale: 1.08,
-    hint: 'O laser do PRECISÃO mostra a linha. Use uma parede.',
+    hint: 'O laser do PRECISÃO mostra a linha. O círculo do ARTILHEIRO não espera o tempo parar.',
     waves: [
       [
         { type: 'sniper', at: [2, 14] },
@@ -313,6 +351,7 @@ export const LEVELS: LevelDef[] = [
         { type: 'sniper', at: [9, 14] },
         { type: 'burster', at: [3, 1] },
         { type: 'gunner', at: [8, 8] },
+        { type: 'mortar', at: [5, 2] },
       ],
     ],
   },
@@ -432,7 +471,7 @@ export const LEVELS: LevelDef[] = [
     reward: 380,
     fireScale: 1.16,
     speedScale: 1.08,
-    hint: 'Economize balas. Deixe o cerco trabalhar por você.',
+    hint: 'Leia as placas do MONGE parado. O ARTILHEIRO continua trabalhando enquanto você pensa.',
     waves: [
       [
         { type: 'gunner', at: [1, 1] },
@@ -442,14 +481,14 @@ export const LEVELS: LevelDef[] = [
       [
         { type: 'shield', at: [3, 13] },
         { type: 'burster', at: [8, 13] },
-        { type: 'gunner', at: [10, 2] },
+        { type: 'mortar', at: [10, 2] },
         { type: 'sniper', at: [1, 8] },
       ],
       [
         { type: 'hunter', at: [2, 3] },
         { type: 'hunter', at: [2, 14] },
         { type: 'shield', at: [9, 14] },
-        { type: 'gunner', at: [11, 8] },
+        { type: 'warden', at: [11, 8] },
       ],
       [
         { type: 'burster', at: [1, 8] },
@@ -612,6 +651,15 @@ export function expandLevel(level: LevelDef, margin = 4): LevelDef {
   ];
   for (const [r, c, ch] of covers) {
     if (out[r]?.[c] === '.' && clearOfSpawn(r, c)) out[r][c] = ch;
+  }
+  if (level.id >= 4) {
+    const rockCovers: [number, number][] = [
+      [Math.floor(rows * 0.42), Math.floor(cols * 0.32)],
+      [Math.floor(rows * 0.58), Math.floor(cols * 0.68)],
+    ];
+    for (const [r, c] of rockCovers) {
+      if (out[r]?.[c] === '.' && clearOfSpawn(r, c)) out[r][c] = 'R';
+    }
   }
 
   return {

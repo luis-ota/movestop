@@ -32,7 +32,19 @@ describe('difficulty', () => {
     expect(enemyHpFor('shield', 'hard')).toBe(2);
     expect(enemyHpFor('shield', 'impossible')).toBe(2);
     expect(enemyHpFor('gunner', 'hard')).toBe(1);
-    expect(enemyHpFor('gunner', 'impossible')).toBe(2);
+    expect(enemyHpFor('gunner', 'impossible')).toBe(3);
+    expect(enemyHpFor('mortar', 'hard')).toBe(2);
+    expect(enemyHpFor('warden', 'impossible')).toBe(4);
+  });
+
+  it('aperta aparo, invulnerabilidade e contato no Impossível', () => {
+    expect(DIFFICULTIES.easy.parryWindow).toBeGreaterThan(DIFFICULTIES.hard.parryWindow);
+    expect(DIFFICULTIES.hard.parryWindow).toBeGreaterThan(DIFFICULTIES.impossible.parryWindow);
+    expect(DIFFICULTIES.impossible.parryRecovery).toBeGreaterThan(DIFFICULTIES.hard.parryRecovery);
+    expect(DIFFICULTIES.impossible.invulnTime).toBeLessThan(DIFFICULTIES.hard.invulnTime);
+    expect(DIFFICULTIES.easy.contactDamage).toBe(false);
+    expect(DIFFICULTIES.hard.contactDamage).toBe(false);
+    expect(DIFFICULTIES.impossible.contactDamage).toBe(true);
   });
 
   it('aplica bônus de vida e munição sem valores inválidos', () => {
@@ -41,7 +53,7 @@ describe('difficulty', () => {
     expect(playerMaxHpFor(0, 'impossible')).toBe(1);
     expect(startingAmmoFor(6, 'easy')).toBe(8);
     expect(startingAmmoFor(6, 'hard')).toBe(6);
-    expect(startingAmmoFor(6, 'impossible')).toBe(5);
+    expect(startingAmmoFor(6, 'impossible')).toBe(4);
     expect(startingAmmoFor(2, 'impossible')).toBe(3);
   });
 
