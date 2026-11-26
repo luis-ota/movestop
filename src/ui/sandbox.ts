@@ -19,6 +19,13 @@ export interface SandboxHost {
 
 const TYPES = Object.keys(ENEMY_DEFS) as EnemyType[];
 
+/** Hotkey per enemy, in panel order: 1…9 then 0 for the tenth. */
+function hotkey(index: number): string | null {
+  if (index < 9) return String(index + 1);
+  if (index === 9) return '0';
+  return null;
+}
+
 const TOGGLES: { key: keyof SandboxOptions; label: string }[] = [
   { key: 'invulnerable', label: 'Invulnerável' },
   { key: 'infiniteAmmo', label: 'Munição infinita' },
@@ -73,14 +80,20 @@ export function mountSandbox(host: SandboxHost): void {
   TYPES.forEach((type, i) => {
     const def = ENEMY_DEFS[type];
     const b = button('', () => game.sandboxSpawn(type, 'random'), 'sbx-btn sbx-enemy');
-    const key = el('kbd', undefined, String(i + 1));
+    const keyLabel = hotkey(i);
+    const key = el('kbd', undefined, keyLabel ?? '·');
     const name = el('span', undefined, def.label);
     b.style.setProperty('--enemy', `#${def.color.toString(16).padStart(6, '0')}`);
     b.append(key, name);
-    b.title = `Clique: posição aleatória · tecla ${i + 1}: no cursor`;
+    b.title = keyLabel ? `Clique: posição aleatória · tecla ${keyLabel}: no cursor` : 'Clique: posição aleatória';
     spawnGrid.append(b);
   });
-  const hint = el('p', 'sbx-hint', 'Teclas 1–9 criam no cursor · Backspace limpa');
+  const bossButton = button('', () => game.sandboxSpawnBoss(), 'sbx-btn sbx-enemy');
+  bossButton.style.setProperty('--enemy', '#ff3b2e');
+  bossButton.append(el('kbd', undefined, 'B'), el('span', undefined, 'RELOJOEIRO'));
+  bossButton.title = 'Chefe final, à frente do jogador · tecla B';
+  spawnGrid.append(bossButton);
+  const hint = el('p', 'sbx-hint', 'Teclas 1–9 e 0 criam no cursor · B chefe final · Backspace limpa');
 
   const toggleLabel = el('p', 'sbx-label', 'Testes');
   const toggleRow = el('div', 'sbx-row');
@@ -139,10 +152,15 @@ export function mountSandbox(host: SandboxHost): void {
     if (!game.isSandbox() || e.repeat) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-    const digit = /^Digit([1-9])$/.exec(e.code);
+    const digit = /^Digit([0-9])$/.exec(e.code);
     if (digit) {
-      const type = TYPES[Number(digit[1]) - 1];
+      const n = Number(digit[1]);
+      const type = TYPES[n === 0 ? 9 : n - 1];
       if (type) game.sandboxSpawn(type, 'cursor');
+      return;
+    }
+    if (e.code === 'KeyB') {
+      game.sandboxSpawnBoss();
       return;
     }
     if (e.code === 'Backspace') {

@@ -1,3 +1,5 @@
+import type { RoninTuning } from './ronin';
+
 export type EnemyType =
   | 'gunner'
   | 'burster'
@@ -7,7 +9,8 @@ export type EnemyType =
   | 'mortar'
   | 'warden'
   | 'statue'
-  | 'ninja';
+  | 'ninja'
+  | 'ronin';
 
 /**
  * Which clock a timer runs on:
@@ -54,6 +57,8 @@ export interface EnemyDef {
   stalk?: StalkTuning;
   strike?: StrikeTuning;
   cloak?: CloakTuning;
+  /** midboss: its whole pattern lives in ronin.ts and game.ts `updateRonin` */
+  ronin?: RoninTuning;
 }
 
 /**
@@ -400,6 +405,42 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       recovery: 0.9,
     },
     cloak: { minOpacity: 0.07, radarAbove: 0.5, trailEvery: 0.28 },
+  },
+  ronin: {
+    type: 'ronin',
+    label: 'RONIN',
+    // hits per phase; enemyHpFor reads this, the phase-2 refill comes from `ronin.hpPerPhase`
+    hp: 3,
+    fixedHp: true,
+    radius: 0.62,
+    fireEvery: 99,
+    windup: 0,
+    bulletSpeed: 0,
+    lead: 0,
+    burst: 0,
+    burstGap: 0,
+    spread: 0,
+    moveSpeed: 0,
+    strafe: 0,
+    sightRange: 60,
+    color: 0xe8c35a,
+    body: 0x3a3f4a,
+    scale: 1.45,
+    ronin: {
+      hpPerPhase: 3,
+      approachSpeed: [2.1, 2.8],
+      stillCreep: 0.8,
+      attackCooldown: [1.1, 0.5],
+      meleeRange: 2.4,
+      shurikenRange: 9,
+      fleeSpeed: 1.8,
+      throwOffset: 1.3,
+      heavy: { windup: [1.0, 0.6], range: 2.9, halfArc: 1.05, recovery: [1.3, 0.85] },
+      quickcut: { windup: 0.32, length: 3.4, width: 0.8, recovery: 0.35 },
+      shuriken: { windup: [0.42, 0.26], count: [3, 5], spread: 0.32, speed: [10, 12.5] },
+      arrows: { count: [3, 4], gap: [0.22, 0.14], speed: 15, lead: 0.06 },
+      dash: { distance: 5.2, time: 0.28 },
+    },
   },
 };
 

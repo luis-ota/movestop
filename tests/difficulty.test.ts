@@ -44,6 +44,11 @@ describe('difficulty', () => {
     expect(enemyHpFor('ninja', 'impossible')).toBe(3);
   });
 
+  it('o ronin tem 3 acertos por fase em qualquer dificuldade', () => {
+    expect(enemyHpFor('ronin', 'easy')).toBe(3);
+    expect(enemyHpFor('ronin', 'impossible')).toBe(3);
+  });
+
   it('aperta aparo, invulnerabilidade e contato no Impossível', () => {
     expect(DIFFICULTIES.easy.parryWindow).toBeGreaterThan(DIFFICULTIES.hard.parryWindow);
     expect(DIFFICULTIES.hard.parryWindow).toBeGreaterThan(DIFFICULTIES.impossible.parryWindow);

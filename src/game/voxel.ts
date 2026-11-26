@@ -306,8 +306,8 @@ export class EnemyAvatar {
     hornR.rotation.z = -0.35;
     const knot = voxel(0.08, 0.08, 0.08, this.bodyMat, 0, 1.03, -0.05);
     this.group.add(legL, legR, torso, shoulder, head, mask, this.eyeL, this.eyeR, knot);
-    // the statue and the ninja have their own head silhouettes
-    if (type !== 'statue' && type !== 'ninja') this.group.add(hornL, hornR);
+    // the statue, the ninja and the ronin have their own head silhouettes
+    if (type !== 'statue' && type !== 'ninja' && type !== 'ronin') this.group.add(hornL, hornR);
 
     const gunMat = new THREE.MeshStandardMaterial({ color: 0x3a3138, roughness: 0.4, metalness: 0.4 });
     const accentMat = new THREE.MeshStandardMaterial({
@@ -378,6 +378,24 @@ export class EnemyAvatar {
       sheath.rotation.z = 0.7;
       const blade = voxel(0.04, 0.05, 0.42, accentMat, 0.3, 0.5, 0.2);
       this.group.add(hood, scarf, sheath, blade);
+    }
+    if (type === 'ronin') {
+      // wide straw kasa, long coat, katana at the hip, bow and quiver on the back
+      const strawMat = new THREE.MeshStandardMaterial({ color: 0xc8a96a, roughness: 0.9 });
+      const brim = voxel(0.92, 0.05, 0.92, strawMat, 0, 1.06, 0);
+      const crown = voxel(0.46, 0.12, 0.46, strawMat, 0, 1.14, 0);
+      const coatL = voxel(0.2, 0.42, 0.36, this.bodyMat, -0.34, 0.42, 0);
+      const coatR = voxel(0.2, 0.42, 0.36, this.bodyMat, 0.34, 0.42, 0);
+      const sash = voxel(0.54, 0.07, 0.38, accentMat, 0, 0.32, 0);
+      const scabbard = voxel(0.05, 0.06, 0.7, this.darkMat, -0.3, 0.34, 0.12);
+      scabbard.rotation.y = 0.2;
+      const blade = voxel(0.04, 0.05, 0.62, accentMat, 0.34, 0.48, 0.3);
+      blade.rotation.x = -0.25;
+      const bow = voxel(0.05, 1.05, 0.05, gunMat, 0.12, 0.6, -0.24);
+      bow.rotation.z = 0.35;
+      const quiver = voxel(0.12, 0.42, 0.12, this.darkMat, -0.16, 0.7, -0.24);
+      quiver.rotation.z = -0.3;
+      this.group.add(brim, crown, coatL, coatR, sash, scabbard, blade, bow, quiver);
     }
 
     this.group.add(contactShadow(0.86));

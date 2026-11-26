@@ -13,7 +13,7 @@ describe('campanha', () => {
     // updateEnemies escolhe o comportamento pela presença do bloco de ajuste,
     // então cada bloco precisa existir exatamente nestes tipos.
     const typesWith = (
-      key: 'kite' | 'reposition' | 'laser' | 'bash' | 'lunge' | 'mortar' | 'wards' | 'stalk' | 'strike' | 'cloak',
+      key: 'kite' | 'reposition' | 'laser' | 'bash' | 'lunge' | 'mortar' | 'wards' | 'stalk' | 'strike' | 'cloak' | 'ronin',
     ) =>
       Object.values(ENEMY_DEFS)
         .filter((def) => def[key] !== undefined)
@@ -29,6 +29,7 @@ describe('campanha', () => {
     expect(typesWith('stalk')).toEqual(['statue']);
     expect(typesWith('strike')).toEqual(['ninja']);
     expect(typesWith('cloak')).toEqual(['ninja']);
+    expect(typesWith('ronin')).toEqual(['ronin']);
   });
 
   it('a estátua anda no relógio invertido e os outros no do mundo', () => {
@@ -46,10 +47,11 @@ describe('campanha', () => {
     expect(strike.flankOffset).toBeLessThan(strike.triggerRange);
   });
 
-  it('a estátua e o ninja ainda não entram na campanha', () => {
+  it('estátua, ninja e ronin ainda não entram na campanha', () => {
     const used = new Set(LEVELS.flatMap((level) => level.waves.flat().map((spawn) => spawn.type)));
     expect(used.has('statue')).toBe(false);
     expect(used.has('ninja')).toBe(false);
+    expect(used.has('ronin')).toBe(false);
   });
 
   it('introduz morteiro e monge em fases diferentes', () => {

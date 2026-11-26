@@ -16,6 +16,14 @@ import {
   type StrikeTuning,
 } from './levels';
 import { buildSandboxLevel } from './sandbox';
+import {
+  byPhase,
+  chooseRoninAttack,
+  roninHealthAfterHit,
+  type RoninAttack,
+  type RoninPhase,
+  type RoninTuning,
+} from './ronin';
 import type { SkinDef, ThemeDef, TrailDef } from './catalog';
 import {
   BossAvatar,
@@ -194,6 +202,8 @@ interface Enemy {
   /** 0..1; below 1 only for cloaked enemies */
   visibility: number;
   trailTimer: number;
+  /** midboss state; null for every other enemy */
+  ronin: RoninState | null;
   aimAngle: number;
   bashRecovery: number;
   burstLeft: number;
@@ -208,6 +218,39 @@ interface Enemy {
   laser: THREE.Line | null;
   laserMat: THREE.LineBasicMaterial | null;
   def: (typeof ENEMY_DEFS)[EnemyType];
+}
+
+/** Ground markings of the ronin: a permanent aura and one shape per attack. */
+interface RoninMarks {
+  group: THREE.Group;
+  aura: THREE.Mesh;
+  auraMat: THREE.MeshBasicMaterial;
+  heavy: THREE.Group;
+  quick: THREE.Group;
+  lanes: THREE.Group[];
+  attackMat: THREE.MeshBasicMaterial;
+}
+
+interface RoninState {
+  tuning: RoninTuning;
+  phase: RoninPhase;
+  /**
+   * stalk: walking in, choosing attacks · windup: an attack charging (world time)
+   * recover: after the heavy cut, the only state where hits land
+   * dash: thrown back by a hit · volley: firing arrows after the dash
+   */
+  mode: 'stalk' | 'windup' | 'recover' | 'dash' | 'volley';
+  attack: RoninAttack | null;
+  last: RoninAttack | null;
+  timer: number;
+  timerMax: number;
+  cooldown: number;
+  /** direction locked when an attack starts */
+  aim: number;
+  dashX: number;
+  dashZ: number;
+  volleyLeft: number;
+  marks: RoninMarks;
 }
 
 interface Bullet {
@@ -672,14 +715,38 @@ export class Game {
     this.emitHud();
   }
 
+  /** The final boss (O Relojoeiro), in front of the player; replaces one already there. */
+  sandboxSpawnBoss(): void {
+    const p = this.player;
+    if (!this.sandbox || !p || !this.level || this.state !== 'playing') return;
+    this.removeBoss();
+    const hp = LEVELS.find((l) => l.boss)?.boss?.hp ?? 14;
+    const x = clamp(p.x, -this.halfW + 3, this.halfW - 3);
+    const z = clamp(p.z - 7, -this.halfH + 3, this.halfH - 3);
+    this.spawnBoss({ ...this.level, boss: { at: [0, 0], hp } }, x, z);
+    this.fx.shock(x, z, 0xff3b2e, 3.2);
+    audio.spawn();
+    this.emitHud();
+  }
+
+  private removeBoss(): void {
+    const boss = this.boss;
+    if (!boss) return;
+    boss.alive = false;
+    boss.collider.active = false;
+    boss.avatar.group.visible = false;
+    this.boss = null;
+  }
+
   /** Removes every enemy, bullet and hazard without rewards. */
   sandboxClear(): void {
     if (!this.sandbox) return;
+    this.removeBoss();
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.alive = false;
       e.avatar.group.visible = false;
-      this.disposeEnemyLaser(e);
+      this.removeEnemyExtras(e);
     }
     this.clearBullets();
     this.clearHazards();
@@ -1987,6 +2054,7 @@ export class Game {
       attackCd: 0,
       visibility: 1,
       trailTimer: 0,
+      ronin: def.ronin ? this.createRoninState(def.ronin, def.color, x, z) : null,
       windup: 0,
       windupMax: 0,
       windupClock: 'world',
@@ -2255,6 +2323,12 @@ export class Game {
       e.avatar.group.rotation.y = e.angle;
       const see = this.hasLOS(e.x, e.z, p.x, p.z) && dist < e.def.sightRange;
       const lunge = e.def.lunge;
+
+      // the midboss runs its own state machine (it never uses the shared windup)
+      if (e.ronin) {
+        this.updateRonin(e, e.ronin, simDt, realDt, dist, dirX, dirZ, targetAngle, see);
+        continue;
+      }
 
       if (e.windup > 0) {
         e.windup = Math.max(0, e.windup - clockDt(e.windupClock, simDt, realDt));
@@ -2571,6 +2645,375 @@ export class Game {
     }
   }
 
+  // ------------------------------------------------------------------ ronin
+
+  private createRoninState(tuning: RoninTuning, color: number, x: number, z: number): RoninState {
+    return {
+      tuning,
+      phase: 1,
+      mode: 'stalk',
+      attack: null,
+      last: null,
+      timer: 0,
+      timerMax: 0,
+      cooldown: byPhase(tuning.attackCooldown, 1),
+      aim: 0,
+      dashX: 0,
+      dashZ: 0,
+      volleyLeft: 0,
+      marks: this.buildRoninMarks(tuning, color, x, z),
+    };
+  }
+
+  /**
+   * Everything he can do is drawn on the ground before it happens: an aura
+   * that always marks him, the heavy cut's sector, the quick cut's lane and
+   * one line per shuriken or arrow.
+   */
+  private buildRoninMarks(t: RoninTuning, color: number, x: number, z: number): RoninMarks {
+    const group = new THREE.Group();
+    group.position.set(x, 0.05, z);
+    const flat = (mat: THREE.MeshBasicMaterial, geo: THREE.BufferGeometry): THREE.Mesh => {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      return mesh;
+    };
+    const flatMat = (c: number, opacity: number) =>
+      new THREE.MeshBasicMaterial({
+        color: c,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+      });
+
+    const auraMat = flatMat(color, 0.55);
+    const aura = flat(auraMat, new THREE.RingGeometry(1.15, 1.32, 48));
+    group.add(aura);
+
+    const attackMat = flatMat(0xff4a3a, 0.2);
+    // a pivot per shape: rotating the pivot by the aim angle points the shape at +Z → aim
+    const heavy = new THREE.Group();
+    heavy.add(flat(attackMat, new THREE.CircleGeometry(t.heavy.range, 40, -Math.PI / 2 - t.heavy.halfArc, t.heavy.halfArc * 2)));
+    const quickGeo = new THREE.PlaneGeometry(t.quickcut.width, t.quickcut.length);
+    quickGeo.translate(0, -t.quickcut.length / 2, 0); // after the -90° tilt it reaches forward
+    const quick = new THREE.Group();
+    quick.add(flat(attackMat, quickGeo));
+    const lanes: THREE.Group[] = [];
+    // lanes start where the projectiles leave his hand, not at his centre
+    const laneLength = t.shurikenRange + 2;
+    const laneGeo = new THREE.PlaneGeometry(0.09, laneLength);
+    laneGeo.translate(0, -(laneLength / 2 + t.throwOffset), 0);
+    for (let i = 0; i < 5; i++) {
+      const lane = new THREE.Group();
+      lane.add(flat(attackMat, laneGeo));
+      lanes.push(lane);
+    }
+    for (const g of [heavy, quick, ...lanes]) {
+      g.visible = false;
+      group.add(g);
+    }
+    this.gameGroup.add(group);
+    return { group, aura, auraMat, heavy, quick, lanes, attackMat };
+  }
+
+  private hideRoninAttackMarks(r: RoninState): void {
+    r.marks.heavy.visible = false;
+    r.marks.quick.visible = false;
+    for (const lane of r.marks.lanes) lane.visible = false;
+  }
+
+  /** Points `count` lanes in a fan around `aim` (spread 0 = all on the same line). */
+  private showRoninLanes(r: RoninState, aim: number, count: number, spread: number): void {
+    r.marks.lanes.forEach((lane, i) => {
+      lane.visible = i < count;
+      lane.rotation.y = aim + (i - (count - 1) / 2) * spread;
+    });
+  }
+
+  /**
+   * The ronin's whole pattern. Attacks charge and land in world time; in
+   * phase 2 his walk also creeps forward while the world is stopped.
+   */
+  private updateRonin(
+    e: Enemy,
+    r: RoninState,
+    simDt: number,
+    realDt: number,
+    dist: number,
+    dirX: number,
+    dirZ: number,
+    targetAngle: number,
+    see: boolean,
+  ): void {
+    const p = this.player!;
+    const t = r.tuning;
+    const marks = r.marks;
+    marks.group.position.set(e.x, 0.05, e.z);
+
+    // aura: gold in phase 1, red in phase 2, pulsing white while he can be hit
+    const auraColor = r.mode === 'recover' ? 0xffffff : r.phase === 2 ? 0xff3b2e : e.def.color;
+    marks.auraMat.color.setHex(auraColor);
+    marks.auraMat.opacity = r.mode === 'recover' ? 0.55 + Math.sin(this.realTime * 14) * 0.3 : 0.55;
+
+    switch (r.mode) {
+      case 'stalk': {
+        r.cooldown = Math.max(0, r.cooldown - simDt);
+        e.avatar.setCharge(0);
+        const stillDt = r.phase === 2 ? Math.max(0, realDt - simDt) : 0;
+        if (dist > t.meleeRange * 0.85) {
+          const pace = byPhase(t.approachSpeed, r.phase) * this.difficulty.enemySpeedMult;
+          // seekEnemy moves pace × dt: pass the distance as dt with a unit pace
+          const step = pace * simDt + t.stillCreep * stillDt;
+          if (step > 0) this.seekEnemy(e, dirX, dirZ, 1, step);
+        }
+        if (stillDt > 0) {
+          // the general turn runs on world time; the phase-2 creep turns him too
+          e.angle = angleLerp(e.angle, targetAngle, Math.min(1, stillDt * 3));
+          e.avatar.group.rotation.y = e.angle;
+        }
+        if (r.cooldown > 0 || !see) break;
+        const awaySpeed = p.vx * dirX + p.vz * dirZ; // dir points from him to the player
+        const attack = chooseRoninAttack({ dist, phase: r.phase, awaySpeed, last: r.last, roll: Math.random() }, t);
+        if (attack) this.startRoninAttack(e, r, attack, targetAngle);
+        break;
+      }
+      case 'windup': {
+        r.timer -= simDt;
+        // shurikens follow the player while charging; the cuts commit to one direction
+        if (r.attack === 'shuriken') {
+          r.aim = targetAngle;
+          this.showRoninLanes(r, r.aim, byPhase(t.shuriken.count, r.phase), t.shuriken.spread);
+        }
+        e.angle = r.aim;
+        e.avatar.group.rotation.y = e.angle;
+        const charge = clamp(1 - r.timer / Math.max(0.01, r.timerMax), 0, 1);
+        e.avatar.setCharge(charge);
+        marks.attackMat.opacity = 0.14 + charge * 0.5;
+        if (!see) {
+          // like every other committed attack, breaking line of sight cancels it
+          r.mode = 'stalk';
+          r.cooldown = 0.4;
+          this.hideRoninAttackMarks(r);
+          e.avatar.setCharge(0);
+          break;
+        }
+        if (r.timer <= 0) this.releaseRoninAttack(e, r, dist);
+        break;
+      }
+      case 'recover': {
+        r.timer -= simDt;
+        e.avatar.setCharge(0);
+        if (r.timer <= 0) {
+          r.mode = 'stalk';
+          r.cooldown = byPhase(t.attackCooldown, r.phase);
+        }
+        break;
+      }
+      case 'dash': {
+        r.timer -= simDt;
+        const speed = t.dash.distance / t.dash.time;
+        this.moveEnemy(e, r.dashX * speed * simDt, r.dashZ * speed * simDt);
+        if (r.timer <= 0) {
+          r.mode = 'volley';
+          r.volleyLeft = byPhase(t.arrows.count, r.phase);
+          r.timer = byPhase(t.arrows.gap, r.phase);
+        }
+        break;
+      }
+      case 'volley': {
+        r.timer -= simDt;
+        this.showRoninLanes(r, targetAngle, 1, 0);
+        marks.attackMat.opacity = 0.45;
+        e.angle = targetAngle;
+        e.avatar.group.rotation.y = e.angle;
+        if (r.timer > 0) break;
+        this.fireRoninProjectile(e, 'arrow');
+        r.volleyLeft--;
+        r.timer = byPhase(t.arrows.gap, r.phase);
+        if (r.volleyLeft <= 0) {
+          r.mode = 'stalk';
+          r.cooldown = byPhase(t.attackCooldown, r.phase);
+          this.hideRoninAttackMarks(r);
+        }
+        break;
+      }
+    }
+  }
+
+  private startRoninAttack(e: Enemy, r: RoninState, attack: RoninAttack, aim: number): void {
+    const t = r.tuning;
+    const windupMult = Math.max(0.75, this.difficulty.enemyWindupMult);
+    const windup =
+      attack === 'heavy'
+        ? byPhase(t.heavy.windup, r.phase)
+        : attack === 'quickcut'
+          ? t.quickcut.windup
+          : byPhase(t.shuriken.windup, r.phase);
+    r.mode = 'windup';
+    r.attack = attack;
+    r.aim = aim;
+    r.timer = windup * windupMult;
+    r.timerMax = r.timer;
+    this.hideRoninAttackMarks(r);
+    if (attack === 'heavy') {
+      r.marks.heavy.visible = true;
+      r.marks.heavy.rotation.y = aim;
+    } else if (attack === 'quickcut') {
+      r.marks.quick.visible = true;
+      r.marks.quick.rotation.y = aim;
+    } else {
+      this.showRoninLanes(r, aim, byPhase(t.shuriken.count, r.phase), t.shuriken.spread);
+    }
+    this.fx.ring(e.x, e.z, r.phase === 2 ? 0xff3b2e : e.def.color, 1.6, 0.45);
+    this.tryEnemySfx();
+  }
+
+  /** A parry facing him blocks a sword hit (no damage, a little focus). */
+  private parriedRoninCut(e: Enemy): boolean {
+    const p = this.player!;
+    if (p.parryTime <= 0 || !inCone(p.x, p.z, p.angle, e.x, e.z, 1.3)) return false;
+    p.parryTime = 0;
+    this.fx.ring(p.x, p.z, 0x2ee6d0, p.parryRadius * 0.9, 0.36);
+    this.fx.sparks(p.x, 0.7, p.z, 0xffd76a, 10, 5);
+    audio.parry();
+    this.focus = Math.min(100, this.focus + 6);
+    return true;
+  }
+
+  private releaseRoninAttack(e: Enemy, r: RoninState, dist: number): void {
+    const p = this.player!;
+    const t = r.tuning;
+    const attack = r.attack;
+    this.hideRoninAttackMarks(r);
+    e.avatar.setCharge(0);
+    r.last = attack;
+    r.attack = null;
+
+    if (attack === 'heavy') {
+      this.fx.slash(e.x, e.z, r.aim, e.def.color, t.heavy.range, true);
+      audio.slash(true);
+      this.shake = Math.max(this.shake, 0.35);
+      const inReach =
+        dist < t.heavy.range + Game.PLAYER_RADIUS &&
+        inCone(e.x, e.z, r.aim, p.x, p.z, t.heavy.halfArc) &&
+        this.hasLOS(e.x, e.z, p.x, p.z);
+      if (inReach && !this.parriedRoninCut(e)) this.hitPlayer();
+      // the slow cut leaves him open: the only window where hits land
+      r.mode = 'recover';
+      r.timer = byPhase(t.heavy.recovery, r.phase);
+      r.timerMax = r.timer;
+      return;
+    }
+
+    if (attack === 'quickcut') {
+      const x0 = e.x;
+      const z0 = e.z;
+      const dx = Math.sin(r.aim);
+      const dz = Math.cos(r.aim);
+      this.moveEnemy(e, dx * t.quickcut.length, dz * t.quickcut.length);
+      // anything on the path he actually travelled is cut
+      const sx = e.x - x0;
+      const sz = e.z - z0;
+      const len2 = sx * sx + sz * sz || 1e-6;
+      const k = clamp(((p.x - x0) * sx + (p.z - z0) * sz) / len2, 0, 1);
+      const off = Math.hypot(p.x - (x0 + sx * k), p.z - (z0 + sz * k));
+      this.fx.slash(e.x, e.z, r.aim, 0xff3b2e, 1.8, false);
+      this.fx.afterimage(x0, z0, r.aim, 0xff3b2e);
+      audio.slash(true);
+      if (off < t.quickcut.width / 2 + Game.PLAYER_RADIUS && !this.parriedRoninCut(e)) this.hitPlayer();
+      r.mode = 'stalk';
+      r.cooldown = t.quickcut.recovery;
+      return;
+    }
+
+    // shurikens: one fan, every star parryable
+    this.fireRoninProjectile(e, 'shuriken');
+    r.mode = 'stalk';
+    r.cooldown = byPhase(t.attackCooldown, r.phase);
+  }
+
+  private fireRoninProjectile(e: Enemy, kind: 'shuriken' | 'arrow'): void {
+    const p = this.player!;
+    const r = e.ronin!;
+    const t = r.tuning;
+    const level = this.level!;
+    const bulletMult = level.speedScale * this.difficulty.enemyBulletSpeedMult;
+    if (kind === 'arrow') {
+      const tx = p.x + p.vx * t.arrows.lead;
+      const tz = p.z + p.vz * t.arrows.lead;
+      const a = Math.atan2(tx - e.x, tz - e.z);
+      const sx = e.x + Math.sin(a) * t.throwOffset;
+      const sz = e.z + Math.cos(a) * t.throwOffset;
+      this.spawnBullet(sx, sz, a, t.arrows.speed * bulletMult, 'enemy', 0xffe7a8, e.def.color, 1.35, false, e);
+      audio.enemyShoot();
+      return;
+    }
+    const count = byPhase(t.shuriken.count, r.phase);
+    const speed = byPhase(t.shuriken.speed, r.phase) * bulletMult;
+    for (let i = 0; i < count; i++) {
+      const a = r.aim + (i - (count - 1) / 2) * t.shuriken.spread;
+      const sx = e.x + Math.sin(a) * t.throwOffset;
+      const sz = e.z + Math.cos(a) * t.throwOffset;
+      this.spawnBullet(sx, sz, a, speed, 'enemy', 0xd8dce8, 0xb8c0d8, 0.8, false, e);
+    }
+    this.fx.sparks(e.x, 0.8, e.z, 0xd8dce8, 5, 3);
+    audio.enemyShoot();
+  }
+
+  /**
+   * Every damage source ends here for the ronin. Outside the recovery after
+   * his heavy cut he blocks it; inside, it costs exactly one hit and throws
+   * him back into a dash and an arrow volley.
+   */
+  private hitRonin(e: Enemy): void {
+    const r = e.ronin!;
+    if (r.mode !== 'recover') {
+      this.fx.sparks(e.x, 1.0, e.z, 0xffe08a, 8, 4);
+      this.fx.ring(e.x, e.z, 0xffe08a, 0.9, 0.2);
+      audio.parry();
+      return;
+    }
+    const next = roninHealthAfterHit(r.phase, e.hp, r.tuning);
+    e.avatar.flash();
+    this.fx.sparks(e.x, 1.0, e.z, 0xffe3b0, 10, 5);
+    audio.impact();
+    this.shake = Math.max(this.shake, 0.25);
+    if (next.dead) {
+      e.hp = 0;
+      this.killEnemy(e);
+      this.emitHud();
+      return;
+    }
+    if (next.phase !== r.phase) {
+      this.fx.shock(e.x, e.z, 0xff3b2e, 3.6);
+      this.shake = Math.max(this.shake, 0.6);
+      audio.spawn();
+    }
+    r.phase = next.phase;
+    e.hp = next.hp;
+    // thrown back: dash away from the player (a little to the side), then arrows
+    const p = this.player!;
+    let ax = e.x - p.x;
+    let az = e.z - p.z;
+    const len = Math.hypot(ax, az) || 1;
+    ax /= len;
+    az /= len;
+    const side = Math.random() < 0.5 ? -0.35 : 0.35;
+    const dx = ax + az * side;
+    const dz = az - ax * side;
+    const dl = Math.hypot(dx, dz) || 1;
+    r.mode = 'dash';
+    r.dashX = dx / dl;
+    r.dashZ = dz / dl;
+    r.timer = r.tuning.dash.time;
+    r.attack = null;
+    this.hideRoninAttackMarks(r);
+    this.fx.afterimage(e.x, e.z, e.angle, e.def.color);
+    this.emitHud();
+  }
+
   private createMortarHazard(e: Enemy): void {
     const p = this.player!;
     const mortar = e.def.mortar;
@@ -2792,8 +3235,9 @@ export class Game {
           const px = x0 + dx * t;
           const pz = z0 + dz * t;
           if (Math.hypot(px - e.x, pz - e.z) > e.def.radius + 0.06) continue;
-          if (e.def.stalk) {
-            this.deflectOffStone(e, b, px, pz);
+          // stone and the ronin's blade turn bullets away
+          if (e.def.stalk || e.ronin) {
+            this.deflectBullet(e, b, px, pz);
             hitSomething = true;
             break;
           }
@@ -2836,8 +3280,8 @@ export class Game {
             const px = x0 + dx * t;
             const pz = z0 + dz * t;
             if (Math.hypot(px - e.x, pz - e.z) <= e.def.radius + 0.05) {
-              if (e.def.stalk) {
-                this.deflectOffStone(e, b, px, pz);
+              if (e.def.stalk || e.ronin) {
+                this.deflectBullet(e, b, px, pz);
               } else {
                 this.damageEnemy(e, 1);
                 this.removeBullet(b);
@@ -2885,13 +3329,23 @@ export class Game {
     if (this.bullets.some((b) => !b.alive)) this.bullets = this.bullets.filter((b) => b.alive);
   }
 
-  /** Stone takes no bullet damage; the impact only shoves the statue back. */
-  private deflectOffStone(e: Enemy, b: Bullet, px: number, pz: number): void {
+  /**
+   * Bullets that do no damage: stone shoves the statue back a little, the
+   * ronin parries with the blade (no push).
+   */
+  private deflectBullet(e: Enemy, b: Bullet, px: number, pz: number): void {
     const push = e.def.stalk?.bulletPush ?? 0;
-    const vlen = Math.hypot(b.vx, b.vz) || 1;
-    this.moveEnemy(e, (b.vx / vlen) * push, (b.vz / vlen) * push);
-    this.fx.sparks(px, 0.6, pz, 0xd8d4c8, 6, 4);
-    audio.impact();
+    if (push > 0) {
+      const vlen = Math.hypot(b.vx, b.vz) || 1;
+      this.moveEnemy(e, (b.vx / vlen) * push, (b.vz / vlen) * push);
+    }
+    if (e.ronin) {
+      this.fx.sparks(px, 0.9, pz, 0xffe08a, 8, 4);
+      audio.parry();
+    } else {
+      this.fx.sparks(px, 0.6, pz, 0xd8d4c8, 6, 4);
+      audio.impact();
+    }
     this.removeBullet(b);
   }
 
@@ -2903,6 +3357,11 @@ export class Game {
 
   private damageEnemy(e: Enemy, amount: number): void {
     if (!e.alive || amount <= 0) return;
+    // the midboss counts hits, not damage, and blocks outside its opening
+    if (e.ronin) {
+      this.hitRonin(e);
+      return;
+    }
     e.hp = Math.max(0, e.hp - amount);
     if (e.hp <= 0) {
       this.killEnemy(e);
@@ -2926,13 +3385,15 @@ export class Game {
     this.shake = Math.max(this.shake, 0.16);
     this.kills++;
     if (this.slowmo <= 0) this.focus = Math.min(100, this.focus + 14);
-    this.disposeEnemyLaser(e);
+    this.removeEnemyExtras(e);
     if (!this.level?.noAmmoDrops && (Math.random() < 0.34 * this.difficulty.ammoDropMult || e.type === 'shield' || e.type === 'mortar' || e.type === 'warden' || this.level?.boss)) {
       this.dropAmmo(e.x, e.z);
     }
   }
 
-  private disposeEnemyLaser(e: Enemy): void {
+  /** Things an enemy owns outside its avatar: the sniper laser, the ronin's ground marks. */
+  private removeEnemyExtras(e: Enemy): void {
+    if (e.ronin) e.ronin.marks.group.visible = false;
     if (!e.laser) return;
     e.laser.visible = false;
     this.gameGroup.remove(e.laser);
@@ -3223,6 +3684,8 @@ export class Game {
   }
 
   private completeLevel(): void {
+    // the sandbox is never won, not even by killing the final boss there
+    if (this.sandbox) return;
     if (this.completionPending) return;
     // a hit and the last kill can land in the same frame; dying wins, never "dead and won"
     if (this.state !== 'playing') return;
@@ -3405,10 +3868,11 @@ export class Game {
       ...this.enemies
         // a cloaked enemy only shows on the radar when it shows in the world
         .filter((e) => e.alive && e.visibility >= (e.def.cloak?.radarAbove ?? 0))
-        .map((e) => ({ x: e.x, z: e.z, kind: 'enemy' as const })),
+        .map((e) => ({ x: e.x, z: e.z, kind: e.ronin ? ('boss' as const) : ('enemy' as const) })),
       ...this.coins.filter((c) => !c.taken).map((c) => ({ x: c.x, z: c.z, kind: 'coin' as const })),
     ];
     if (this.boss?.alive) radar.push({ x: this.boss.x, z: this.boss.z, kind: 'boss' });
+    const bar = this.bossBar();
     this.events.onHud({
       ammo: p.ammo,
       radar,
@@ -3428,10 +3892,35 @@ export class Game {
       parry: p.parryMax > 0 ? 1 - p.parryCd / p.parryMax : 1,
       unarmed: p.ammo <= 0 && (this.level?.ammo ?? 0) === 0,
       focus: this.focus,
-      bossHp: this.boss?.alive ? this.boss.hp : 0,
-      bossMax: this.boss?.maxHp ?? 0,
-      bossName: this.level?.bossName ?? '',
+      bossHp: bar.hp,
+      bossMax: bar.max,
+      bossName: bar.name,
     });
+  }
+
+  /**
+   * The top bar: the final boss when there is one (as before), otherwise a
+   * living ronin, whose two phases read as one bar of 2 × hpPerPhase hits.
+   */
+  private bossBar(): { hp: number; max: number; name: string } {
+    if (this.boss) {
+      return {
+        hp: this.boss.alive ? this.boss.hp : 0,
+        max: this.boss.maxHp,
+        name: this.level?.bossName || 'O Relojoeiro',
+      };
+    }
+    const ronin = this.enemies.find((e) => e.alive && e.ronin);
+    if (ronin?.ronin) {
+      const r = ronin.ronin;
+      const per = r.tuning.hpPerPhase;
+      return {
+        hp: ronin.hp + (r.phase === 1 ? per : 0),
+        max: per * 2,
+        name: `Ronin · ${r.phase === 1 ? 'I' : 'II'}`,
+      };
+    }
+    return { hp: 0, max: 0, name: '' };
   }
 
   private buildMenu(): void {
