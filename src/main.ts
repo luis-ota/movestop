@@ -161,6 +161,10 @@ const actions: UIActions = {
     ui.showHUD();
   },
   restart: () => {
+    if (game.isSandbox()) {
+      startSandboxArena();
+      return;
+    }
     reviveCount = 0;
     const idx = game.getLevelIndex();
     ui.setLevel(LEVELS[idx].id);
@@ -689,6 +693,23 @@ document.addEventListener('visibilitychange', () => {
   game.releaseInputs();
   if (game.getState() === 'playing') actions.pause();
 });
+
+function startSandboxArena(): void {
+  game.startSandbox();
+  ui.showHUD();
+}
+
+// Dev-only enemy sandbox: `bun run dev`, then open http://localhost:5173/?sandbox
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('sandbox')) {
+  const { mountSandbox } = await import('./ui/sandbox');
+  mountSandbox({
+    game,
+    getDifficulty: () => save.difficulty,
+    setDifficulty: (difficulty) => setDifficulty(difficulty),
+    restart: () => startSandboxArena(),
+  });
+  startSandboxArena();
+}
 
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__MOVESTOP__ = {

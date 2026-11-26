@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ENEMY_DEFS, LEVELS, LevelDef, EnemyType, totalWaves, expandLevel } from './levels';
+import { buildSandboxLevel } from './sandbox';
 import type { SkinDef, ThemeDef, TrailDef } from './catalog';
 import { BossAvatar, EnemyAvatar, PlayerAvatar, makeAmmoMesh, makeBulletMesh, makeCoinMesh } from './voxel';
 import { FX } from './fx';
@@ -278,6 +279,10 @@ function clockDt(clock: Clock, simDt: number, realDt: number): number {
   return clock === 'real' ? realDt : simDt;
 }
 
+export interface SandboxOptions {
+  invulnerable: boolean;
+  infiniteAmmo: boolean;
+}
 
 /** How fast enemies turn to face the player, in world time. */
 const ENEMY_TURN_RATE = 9;
@@ -340,6 +345,8 @@ export class Game {
   private state: GameState = 'idle';
   private mode: 'menu' | 'game' | 'duel' = 'menu';
   private pausedFrom: GameState = 'playing';
+  /** non-null while the dev sandbox arena is loaded */
+  private sandbox: SandboxOptions | null = null;
 
   private level: LevelDef | null = null;
   private levelIndex = 0;
@@ -561,6 +568,7 @@ export class Game {
   }
 
   showMenu(): void {
+    this.sandbox = null;
     this.touchFire = false;
     this.disposeLevel();
     this.mode = 'menu';
@@ -579,7 +587,87 @@ export class Game {
 
   startLevel(index: number, autoStart = false): void {
     const authored = LEVELS[Math.max(0, Math.min(LEVELS.length - 1, index))];
-    const level = expandLevel(authored, 9);
+    this.sandbox = null;
+    this.loadLevel(expandLevel(authored, 9), index, autoStart);
+  }
+
+  // ---------------------------------------------------------------- sandbox
+
+  /** Dev arena: no waves, no progress, no rewards; enemies are spawned by hand. */
+  startSandbox(): void {
+    this.sandbox ??= { invulnerable: false, infiniteAmmo: true };
+    this.loadLevel(buildSandboxLevel(), this.levelIndex, true);
+  }
+
+  isSandbox(): boolean {
+    return this.sandbox !== null;
+  }
+
+  getSandboxOptions(): SandboxOptions | null {
+    return this.sandbox ? { ...this.sandbox } : null;
+  }
+
+  setSandboxOption(key: keyof SandboxOptions, value: boolean): void {
+    if (!this.sandbox) return;
+    this.sandbox[key] = value;
+    if (key === 'infiniteAmmo' && value && this.player) this.player.ammo = Math.max(this.player.ammo, 1);
+    this.emitHud();
+  }
+
+  /** Spawns at the cursor (desktop aim point) or, failing that, at a safe random cell. */
+  sandboxSpawn(type: EnemyType, at: 'cursor' | 'random' = 'cursor'): void {
+    const p = this.player;
+    if (!this.sandbox || !p || !this.level || this.state !== 'playing') return;
+    const radius = ENEMY_DEFS[type].radius;
+    let pos: { x: number; z: number };
+    if (at === 'cursor') {
+      pos = {
+        x: clamp(p.aimX, -this.halfW + 1, this.halfW - 1),
+        z: clamp(p.aimZ, -this.halfH + 1, this.halfH - 1),
+      };
+      resolveCircle(pos, radius, this.colliders);
+    } else {
+      const free = this.floorCellList.filter(
+        (c) =>
+          Math.hypot(c.x - p.x, c.z - p.z) > 4 &&
+          Math.abs(c.x) < this.halfW - 1 &&
+          Math.abs(c.z) < this.halfH - 1 &&
+          !this.colliders.some((k) => k.active && c.x > k.minX - 0.6 && c.x < k.maxX + 0.6 && c.z > k.minZ - 0.6 && c.z < k.maxZ + 0.6),
+      );
+      const cell = free[Math.floor(Math.random() * free.length)];
+      if (!cell) return;
+      pos = { x: cell.x, z: cell.z };
+    }
+    this.spawnEnemy(type, pos.x, pos.z);
+    this.emitHud();
+  }
+
+  /** Removes every enemy, bullet and hazard without rewards. */
+  sandboxClear(): void {
+    if (!this.sandbox) return;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      e.alive = false;
+      e.avatar.group.visible = false;
+      this.disposeEnemyLaser(e);
+    }
+    this.clearBullets();
+    this.clearHazards();
+    this.emitHud();
+  }
+
+  sandboxFillFocus(): void {
+    if (!this.sandbox) return;
+    this.focus = 100;
+    this.emitHud();
+  }
+
+  /** Live numbers for the sandbox panel. */
+  sandboxStats(): { timeScale: number; enemies: number } {
+    return { timeScale: this.timeScale, enemies: this.enemies.filter((e) => e.alive).length };
+  }
+
+  private loadLevel(level: LevelDef, index: number, autoStart: boolean): void {
     this.currentBiomeId = getBiome(level.id).id;
     this.applyTheme(this.loadout.theme, this.currentBiomeId);
     if (!this.lowQuality) {
@@ -1098,7 +1186,8 @@ export class Game {
 
   restartLevel(): void {
     if (!this.level) return;
-    this.startLevel(this.levelIndex, true);
+    if (this.sandbox) this.startSandbox();
+    else this.startLevel(this.levelIndex, true);
   }
 
   revive(): void {
@@ -1291,7 +1380,7 @@ export class Game {
       this.emitHud();
       return;
     }
-    p.ammo -= 1;
+    if (!this.sandbox?.infiniteAmmo) p.ammo -= 1;
     p.fireCd = 0.2;
     this.faceAim(p);
     const dx = Math.sin(p.angle);
@@ -2660,22 +2749,32 @@ export class Game {
     this.shake = Math.max(this.shake, 0.16);
     this.kills++;
     if (this.slowmo <= 0) this.focus = Math.min(100, this.focus + 14);
-    if (e.laser) {
-      e.laser.visible = false;
-      this.gameGroup.remove(e.laser);
-      e.laser.geometry.dispose();
-      e.laserMat?.dispose();
-      e.laser = null;
-    }
+    this.disposeEnemyLaser(e);
     if (!this.level?.noAmmoDrops && (Math.random() < 0.34 * this.difficulty.ammoDropMult || e.type === 'shield' || e.type === 'mortar' || e.type === 'warden' || this.level?.boss)) {
       this.dropAmmo(e.x, e.z);
     }
+  }
+
+  private disposeEnemyLaser(e: Enemy): void {
+    if (!e.laser) return;
+    e.laser.visible = false;
+    this.gameGroup.remove(e.laser);
+    e.laser.geometry.dispose();
+    e.laserMat?.dispose();
+    e.laser = null;
   }
 
   private hitPlayer(): void {
     const p = this.player;
     if (!p || this.state !== 'playing' || p.invuln > 0) return;
     this.events.onPlayerHit();
+    if (this.sandbox?.invulnerable) {
+      // show the hit, take nothing: lets you watch an enemy's whole pattern
+      p.invuln = 0.35;
+      this.fx.shock(p.x, p.z, 0xff3b2e, 1.4);
+      audio.hit();
+      return;
+    }
     if (p.hp > 1) {
       p.hp -= 1;
       p.invuln = this.difficulty.invulnTime;
@@ -2919,6 +3018,8 @@ export class Game {
 
   private checkWaveProgress(dt: number): void {
     if (!this.level || this.state !== 'playing') return;
+    // the sandbox has no waves and is never "won"
+    if (this.sandbox) return;
     if (this.boss) {
       // covers a boss killed on the very frame the player died, then revived
       if (!this.boss.alive || this.boss.hp <= 0) this.completeLevel();
@@ -3025,7 +3126,9 @@ export class Game {
         this.updateCamera(dt);
         if (this.stateTimer <= 0) {
           this.state = 'dead';
-          this.emitDeath();
+          // the sandbox never shows the death screen; you just get back up
+          if (this.sandbox) this.revive();
+          else this.emitDeath();
         }
         this.fx.update(dt);
       } else if (this.state === 'won') {
