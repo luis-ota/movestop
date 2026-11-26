@@ -167,7 +167,7 @@ interface Enemy {
   fireTimer: number;
   windup: number;
   windupMax: number;
-  windupClock: 'world' | 'real';
+  windupClock: Clock;
   attackKind: 'shot' | 'bash' | 'lunge' | 'mortar' | 'wards';
   aimAngle: number;
   bashRecovery: number;
@@ -240,7 +240,7 @@ interface GroundHazard {
   radius: number;
   age: number;
   duration: number;
-  clock: 'world' | 'real';
+  clock: Clock;
   armed: boolean;
   active: boolean;
   owner: Enemy | null;
@@ -267,6 +267,24 @@ interface Boss {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const damp = (v: number, target: number, lambda: number, dt: number) =>
   v + (target - v) * (1 - Math.exp(-lambda * dt));
+
+/**
+ * Which clock a timer runs on: 'world' advances only while the player moves
+ * (simDt); 'real' always advances (realDt).
+ */
+type Clock = 'world' | 'real';
+
+function clockDt(clock: Clock, simDt: number, realDt: number): number {
+  return clock === 'real' ? realDt : simDt;
+}
+
+
+/** How fast enemies turn to face the player, in world time. */
+const ENEMY_TURN_RATE = 9;
+/** Extra delay added to a shot that was cancelled by breaking line of sight. */
+const LOS_BREAK_DELAY = 0.5;
+/** Random extra seconds added to every enemy attack cooldown. */
+const ENEMY_FIRE_JITTER = 0.7;
 
 function angleLerp(a: number, b: number, t: number): number {
   let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -2023,8 +2041,10 @@ export class Game {
     if (p.invuln <= 0) {
       for (const e of this.enemies) {
         if (!e.alive) continue;
-        const contactRange = e.type === 'hunter' ? 0.62 : e.def.radius + Game.PLAYER_RADIUS;
-        if (!this.difficulty.contactDamage && e.type !== 'hunter') continue;
+        // lunging enemies always hurt on contact; the rest only on difficulties with contact damage
+        const lunge = e.def.lunge;
+        const contactRange = lunge ? lunge.contactRange : e.def.radius + Game.PLAYER_RADIUS;
+        if (!this.difficulty.contactDamage && !lunge) continue;
         if (Math.hypot(e.x - p.x, e.z - p.z) < contactRange && this.hasLOS(e.x, e.z, p.x, p.z)) {
           this.hitPlayer();
           break;
@@ -2131,22 +2151,24 @@ export class Game {
       const dirX = dx / dist;
       const dirZ = dz / dist;
       const targetAngle = Math.atan2(dirX, dirZ);
-      e.angle = angleLerp(e.angle, targetAngle, Math.min(1, simDt * 9));
+      e.angle = angleLerp(e.angle, targetAngle, Math.min(1, simDt * ENEMY_TURN_RATE));
       e.avatar.group.rotation.y = e.angle;
       const see = this.hasLOS(e.x, e.z, p.x, p.z) && dist < e.def.sightRange;
+      const lunge = e.def.lunge;
 
       if (e.windup > 0) {
-        const windupDt = e.windupClock === 'real' ? realDt : simDt;
-        e.windup = Math.max(0, e.windup - windupDt);
+        e.windup = Math.max(0, e.windup - clockDt(e.windupClock, simDt, realDt));
         e.charge = clamp(1 - e.windup / Math.max(0.01, e.windupMax), 0, 1);
         e.avatar.setCharge(e.charge);
-        if (e.type === 'sniper' && e.laser && e.laserMat) {
+        const laser = e.def.laser;
+        if (laser && e.laser && e.laserMat) {
           e.laser.visible = true;
-          // The laser tracks for the first 70%, then promises one fixed line.
-          if (e.charge < 0.7) e.aimAngle = targetAngle;
-          const t = this.losEnd(e.x, e.z, e.x + Math.sin(e.aimAngle) * 30, e.z + Math.cos(e.aimAngle) * 30);
-          const ex = e.x + Math.sin(e.aimAngle) * 30 * t;
-          const ez = e.z + Math.cos(e.aimAngle) * 30 * t;
+          // The laser tracks the player until `lockAt`, then promises one fixed line.
+          if (e.charge < laser.lockAt) e.aimAngle = targetAngle;
+          const reach = laser.length;
+          const t = this.losEnd(e.x, e.z, e.x + Math.sin(e.aimAngle) * reach, e.z + Math.cos(e.aimAngle) * reach);
+          const ex = e.x + Math.sin(e.aimAngle) * reach * t;
+          const ez = e.z + Math.cos(e.aimAngle) * reach * t;
           const pos = e.laser.geometry.getAttribute('position') as THREE.BufferAttribute;
           pos.setXYZ(0, e.x, 1.02, e.z);
           pos.setXYZ(1, ex, 0.6, ez);
@@ -2160,7 +2182,7 @@ export class Game {
           e.avatar.setCharge(0);
           if (e.laser) e.laser.visible = false;
           if (e.laserMat) e.laserMat.opacity = 0;
-          if (e.attackKind === 'shot') e.fireTimer += 0.5;
+          if (e.attackKind === 'shot') e.fireTimer += LOS_BREAK_DELAY;
           continue;
         }
         if (e.windup <= 0) {
@@ -2170,11 +2192,11 @@ export class Game {
             e.burstTimer = e.def.burstGap;
           } else if (e.attackKind === 'bash') {
             this.shieldBash(e, dist);
-          } else if (e.attackKind === 'lunge') {
-            e.lungeTime = 0.3;
+          } else if (e.attackKind === 'lunge' && lunge) {
+            e.lungeTime = lunge.duration;
             e.lungeX = Math.sin(e.aimAngle);
             e.lungeZ = Math.cos(e.aimAngle);
-            e.lungeCd = 1.7 * this.difficulty.enemyFireMult;
+            e.lungeCd = lunge.cooldown * this.difficulty.enemyFireMult;
             this.fx.ring(e.x, e.z, 0xff9a1f, 1.1, 0.3);
             audio.slash(true);
           } else if (e.attackKind === 'wards') {
@@ -2182,7 +2204,8 @@ export class Game {
           }
           if (e.laser) e.laser.visible = false;
           if (e.laserMat) e.laserMat.opacity = 0;
-          e.fireTimer = (e.def.fireEvery / level.fireScale) * this.difficulty.enemyFireMult + Math.random() * 0.7;
+          e.fireTimer =
+            (e.def.fireEvery / level.fireScale) * this.difficulty.enemyFireMult + Math.random() * ENEMY_FIRE_JITTER;
           e.avatar.setCharge(0);
           e.charge = 0;
         }
@@ -2200,17 +2223,18 @@ export class Game {
       }
 
       // movement and attack commitment
-      if (e.type === 'hunter') {
+      if (lunge) {
         e.lungeCd = Math.max(0, e.lungeCd - simDt);
         if (e.lungeTime > 0) {
           e.lungeTime -= simDt;
-          this.moveEnemy(e, e.lungeX * 7.4 * this.difficulty.enemySpeedMult * simDt, e.lungeZ * 7.4 * this.difficulty.enemySpeedMult * simDt);
-          if (Math.hypot(e.x - p.x, e.z - p.z) < 0.62) this.hitPlayer();
+          const step = lunge.speed * this.difficulty.enemySpeedMult * simDt;
+          this.moveEnemy(e, e.lungeX * step, e.lungeZ * step);
+          if (Math.hypot(e.x - p.x, e.z - p.z) < lunge.contactRange) this.hitPlayer();
           e.avatar.setCharge(1);
-        } else if (e.lungeCd <= 0 && dist < 4.2) {
+        } else if (e.lungeCd <= 0 && dist < lunge.triggerRange) {
           e.attackKind = 'lunge';
           e.windupClock = 'real';
-          e.windup = 0.65 * Math.max(0.75, this.difficulty.enemyWindupMult);
+          e.windup = lunge.windup * Math.max(lunge.minWindupMult, this.difficulty.enemyWindupMult);
           e.windupMax = e.windup;
           e.aimAngle = targetAngle;
           e.charge = 0;
@@ -2223,25 +2247,30 @@ export class Game {
         continue;
       }
 
-      if (e.type === 'shield') {
-        if (e.bashRecovery <= 0 && dist > 1.9) {
-          const pace = (see ? e.def.moveSpeed : e.def.moveSpeed * 0.8) * this.difficulty.enemySpeedMult;
+      const bash = e.def.bash;
+      const reposition = e.def.reposition;
+      const kite = e.def.kite;
+      if (bash) {
+        if (e.bashRecovery <= 0 && dist > bash.holdDistance) {
+          const pace = (see ? e.def.moveSpeed : e.def.moveSpeed * bash.blindPaceMult) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
-      } else if (e.type === 'sniper') {
-        if (!see && dist > 0.9) this.seekEnemy(e, dirX, dirZ, 0.46 * this.difficulty.enemySpeedMult, simDt);
-      } else if (e.type === 'gunner' || e.type === 'burster' || e.type === 'mortar' || e.type === 'warden') {
+      } else if (reposition) {
+        if (!see && dist > reposition.minDistance) {
+          this.seekEnemy(e, dirX, dirZ, reposition.speed * this.difficulty.enemySpeedMult, simDt);
+        }
+      } else if (kite) {
         if (see) {
           const perpX = dirZ;
           const perpZ = -dirX;
           let mx = perpX * e.def.strafe * e.strafeDir;
           let mz = perpZ * e.def.strafe * e.strafeDir;
-          if (dist > 8.5) {
-            mx += dirX * 0.42;
-            mz += dirZ * 0.42;
-          } else if (dist < 3.0) {
-            mx -= dirX * 0.45;
-            mz -= dirZ * 0.45;
+          if (dist > kite.approachBeyond) {
+            mx += dirX * kite.approachSpeed;
+            mz += dirZ * kite.approachSpeed;
+          } else if (dist < kite.retreatWithin) {
+            mx -= dirX * kite.retreatSpeed;
+            mz -= dirZ * kite.retreatSpeed;
           }
           mx *= this.difficulty.enemySpeedMult;
           mz *= this.difficulty.enemySpeedMult;
@@ -2250,7 +2279,7 @@ export class Game {
           this.moveEnemy(e, mx * simDt, mz * simDt);
           if (Math.abs(e.x - beforeX) < 1e-4 && Math.abs(e.z - beforeZ) < 1e-4) e.strafeDir *= -1;
         } else {
-          const pace = (dist > 6 ? 0.55 : 0.34) * this.difficulty.enemySpeedMult;
+          const pace = (dist > kite.seekFar ? kite.seekFarSpeed : kite.seekNearSpeed) * this.difficulty.enemySpeedMult;
           this.seekEnemy(e, dirX, dirZ, pace, simDt);
         }
       }
@@ -2258,21 +2287,22 @@ export class Game {
       e.fireTimer -= simDt;
       if (!see || e.fireTimer > 0 || e.bashRecovery > 0) continue;
       e.aimAngle = targetAngle;
-      if (e.type === 'shield' && dist < 2.25) {
+      const mortar = e.def.mortar;
+      if (bash && dist < bash.triggerRange) {
         e.attackKind = 'bash';
         e.windupClock = 'real';
-        e.windup = 0.7 * Math.max(0.75, this.difficulty.enemyWindupMult);
+        e.windup = bash.windup * Math.max(bash.minWindupMult, this.difficulty.enemyWindupMult);
         e.windupMax = e.windup;
         this.fx.ring(e.x, e.z, 0xff6a3d, 1.8, 0.55);
         this.tryEnemySfx();
-      } else if (e.type === 'mortar') {
+      } else if (mortar) {
         e.attackKind = 'mortar';
         e.windupClock = 'real';
-        e.windup = e.def.windup * Math.max(0.8, this.difficulty.enemyWindupMult);
+        e.windup = e.def.windup * Math.max(mortar.minWindupMult, this.difficulty.enemyWindupMult);
         e.windupMax = e.windup;
         this.createMortarHazard(e);
         this.tryEnemySfx();
-      } else if (e.type === 'warden') {
+      } else if (e.def.wards) {
         e.attackKind = 'wards';
         e.windupClock = 'world';
         e.windup = e.def.windup * windupMult;
@@ -2291,35 +2321,41 @@ export class Game {
 
   private shieldBash(e: Enemy, dist: number): void {
     const p = this.player!;
-    e.bashRecovery = 0.5;
+    const bash = e.def.bash;
+    if (!bash) return;
+    e.bashRecovery = bash.recovery;
     this.fx.slash(e.x, e.z, e.aimAngle, 0xff6a3d, 1.9, false);
     audio.slash(true);
     this.shake = Math.max(this.shake, 0.2);
-    if (dist < 2.35 && inCone(e.x, e.z, e.aimAngle, p.x, p.z, 1.05) && this.hasLOS(e.x, e.z, p.x, p.z)) {
+    if (dist < bash.hitRange && inCone(e.x, e.z, e.aimAngle, p.x, p.z, bash.halfArc) && this.hasLOS(e.x, e.z, p.x, p.z)) {
       this.hitPlayer();
     }
   }
 
   private createMortarHazard(e: Enemy): void {
     const p = this.player!;
+    const mortar = e.def.mortar;
+    if (!mortar) return;
     const x = p.x + p.vx * e.def.lead;
     const z = p.z + p.vz * e.def.lead;
     const target = { x, z };
     resolveCircle(target, 0.16, this.colliders);
-    this.createHazard('mortar', target.x, target.z, 1.3, 0.95, 'real', e);
-    this.fx.ring(target.x, target.z, 0xff8a24, 1.3, 0.45);
+    this.createHazard('mortar', target.x, target.z, mortar.radius, mortar.fuse, 'real', e);
+    this.fx.ring(target.x, target.z, 0xff8a24, mortar.radius, 0.45);
     audio.enemyShoot();
   }
 
   private placeWards(e: Enemy): void {
     const p = this.player!;
+    const wards = e.def.wards;
+    if (!wards) return;
     const angle = Math.atan2(p.x - e.x, p.z - e.z);
-    for (let i = 1; i <= 3; i++) {
-      const distance = i * 1.8;
+    for (let i = 1; i <= wards.count; i++) {
+      const distance = i * wards.spacing;
       const x = e.x + Math.sin(angle) * distance;
       const z = e.z + Math.cos(angle) * distance;
-      if (distance > 8 || !this.hasLOS(e.x, e.z, x, z)) break;
-      this.createHazard('ward', x, z, 1.05, 0.28, 'world', e);
+      if (distance > wards.maxDistance || !this.hasLOS(e.x, e.z, x, z)) break;
+      this.createHazard('ward', x, z, wards.radius, wards.fuse, 'world', e);
     }
     audio.enemyShoot();
   }
@@ -2368,7 +2404,7 @@ export class Game {
         (h.ring.material as THREE.MeshBasicMaterial).opacity = 0.42 + Math.sin(this.realTime * 5 + h.x) * 0.12;
         continue;
       }
-      h.age += h.clock === 'real' ? realDt : simDt;
+      h.age += clockDt(h.clock, simDt, realDt);
       const t = clamp(h.age / h.duration, 0, 1);
       (h.disc.material as THREE.MeshBasicMaterial).opacity = 0.1 + t * 0.24;
       (h.ring.material as THREE.MeshBasicMaterial).opacity = 0.55 + t * 0.45;

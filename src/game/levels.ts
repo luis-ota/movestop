@@ -12,13 +12,106 @@ export interface EnemyDef {
   burst: number;
   burstGap: number;
   spread: number;
+  /**
+   * Seek speed. Only the shield and the hunter read it; ranged enemies move
+   * with `kite` and the sniper with `reposition`.
+   */
   moveSpeed: number;
   strafe: number;
   sightRange: number;
   color: number;
   body: number;
   scale: number;
+  // Behaviour tuning. Each block is present only on the types that use it.
+  kite?: KiteTuning;
+  reposition?: RepositionTuning;
+  laser?: LaserTuning;
+  bash?: BashTuning;
+  lunge?: LungeTuning;
+  mortar?: MortarTuning;
+  wards?: WardTuning;
 }
+
+/** Ranged enemies: strafe while in sight, keep a band of distance, seek when blind. */
+export interface KiteTuning {
+  /** beyond this distance, also step towards the player */
+  approachBeyond: number;
+  approachSpeed: number;
+  /** inside this distance, also step away from the player */
+  retreatWithin: number;
+  retreatSpeed: number;
+  /** blind seek: fast beyond `seekFar`, slow inside it */
+  seekFar: number;
+  seekFarSpeed: number;
+  seekNearSpeed: number;
+}
+
+/** Sniper: holds position while it sees you, walks to regain sight otherwise. */
+export interface RepositionTuning {
+  speed: number;
+  /** stops walking when this close */
+  minDistance: number;
+}
+
+/** Sniper laser: tracks the player until `lockAt` charge, then commits to one line. */
+export interface LaserTuning {
+  lockAt: number;
+  length: number;
+}
+
+/** Shield bash: a short real-time melee swing in front of the shield. */
+export interface BashTuning {
+  /** stops advancing when this close */
+  holdDistance: number;
+  /** seek speed multiplier while the player is out of sight */
+  blindPaceMult: number;
+  triggerRange: number;
+  windup: number;
+  /** floor for the difficulty windup multiplier */
+  minWindupMult: number;
+  hitRange: number;
+  halfArc: number;
+  recovery: number;
+}
+
+/** Hunter lunge: real-time windup, then a dash that moves in world time. */
+export interface LungeTuning {
+  triggerRange: number;
+  windup: number;
+  minWindupMult: number;
+  duration: number;
+  speed: number;
+  /** multiplied by the difficulty fire multiplier */
+  cooldown: number;
+  /** body contact always hurts, regardless of difficulty */
+  contactRange: number;
+}
+
+/** Mortar: a real-time circle dropped where the player is heading. */
+export interface MortarTuning {
+  radius: number;
+  fuse: number;
+  minWindupMult: number;
+}
+
+/** Warden: a line of plates that arm on contact and detonate in world time. */
+export interface WardTuning {
+  count: number;
+  spacing: number;
+  maxDistance: number;
+  radius: number;
+  fuse: number;
+}
+
+const KITE: KiteTuning = {
+  approachBeyond: 8.5,
+  approachSpeed: 0.42,
+  retreatWithin: 3.0,
+  retreatSpeed: 0.45,
+  seekFar: 6,
+  seekFarSpeed: 0.55,
+  seekNearSpeed: 0.34,
+};
 
 export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
   gunner: {
@@ -39,6 +132,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xe23b2e,
     body: 0xc93227,
     scale: 1,
+    kite: KITE,
   },
   burster: {
     type: 'burster',
@@ -58,6 +152,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xff7a1a,
     body: 0xe06a12,
     scale: 0.96,
+    kite: KITE,
   },
   sniper: {
     type: 'sniper',
@@ -77,6 +172,8 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xff3d9a,
     body: 0x9b1a5e,
     scale: 1,
+    reposition: { speed: 0.46, minDistance: 0.9 },
+    laser: { lockAt: 0.7, length: 30 },
   },
   shield: {
     type: 'shield',
@@ -96,6 +193,16 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xd63a2a,
     body: 0x7f2a22,
     scale: 1.08,
+    bash: {
+      holdDistance: 1.9,
+      blindPaceMult: 0.8,
+      triggerRange: 2.25,
+      windup: 0.7,
+      minWindupMult: 0.75,
+      hitRange: 2.35,
+      halfArc: 1.05,
+      recovery: 0.5,
+    },
   },
   hunter: {
     type: 'hunter',
@@ -115,6 +222,15 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xff9a1f,
     body: 0xcc5f0e,
     scale: 0.92,
+    lunge: {
+      triggerRange: 4.2,
+      windup: 0.65,
+      minWindupMult: 0.75,
+      duration: 0.3,
+      speed: 7.4,
+      cooldown: 1.7,
+      contactRange: 0.62,
+    },
   },
   mortar: {
     type: 'mortar',
@@ -134,6 +250,8 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xffb347,
     body: 0x665b4c,
     scale: 1.08,
+    kite: KITE,
+    mortar: { radius: 1.3, fuse: 0.95, minWindupMult: 0.8 },
   },
   warden: {
     type: 'warden',
@@ -153,6 +271,8 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     color: 0xe8dcc0,
     body: 0x77776d,
     scale: 0.98,
+    kite: KITE,
+    wards: { count: 3, spacing: 1.8, maxDistance: 8, radius: 1.05, fuse: 0.28 },
   },
 };
 

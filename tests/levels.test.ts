@@ -9,6 +9,23 @@ describe('campanha', () => {
     expect(ENEMY_DEFS.warden.bulletSpeed).toBe(0);
   });
 
+  it('liga cada comportamento da IA aos tipos certos', () => {
+    // updateEnemies escolhe o comportamento pela presença do bloco de ajuste,
+    // então cada bloco precisa existir exatamente nestes tipos.
+    const typesWith = (key: 'kite' | 'reposition' | 'laser' | 'bash' | 'lunge' | 'mortar' | 'wards') =>
+      Object.values(ENEMY_DEFS)
+        .filter((def) => def[key] !== undefined)
+        .map((def) => def.type)
+        .sort();
+    expect(typesWith('kite')).toEqual(['burster', 'gunner', 'mortar', 'warden']);
+    expect(typesWith('reposition')).toEqual(['sniper']);
+    expect(typesWith('laser')).toEqual(['sniper']);
+    expect(typesWith('bash')).toEqual(['shield']);
+    expect(typesWith('lunge')).toEqual(['hunter']);
+    expect(typesWith('mortar')).toEqual(['mortar']);
+    expect(typesWith('wards')).toEqual(['warden']);
+  });
+
   it('introduz morteiro e monge em fases diferentes', () => {
     const types = (id: number) => LEVELS.find((level) => level.id === id)!.waves.flat().map((spawn) => spawn.type);
     expect(types(4)).toContain('mortar');
