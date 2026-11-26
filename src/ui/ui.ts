@@ -161,7 +161,14 @@ function skinThumb(skin: SkinDef): string {
 
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.58, 0.64, 56),
-      new THREE.MeshBasicMaterial({ color: skin.accent, transparent: true, opacity: 0.9, side: THREE.DoubleSide, toneMapped: false }),
+      new THREE.MeshBasicMaterial({
+        color: skin.accent,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        forceSinglePass: true, // flat ring: one pass draws both faces
+        toneMapped: false,
+      }),
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.012;

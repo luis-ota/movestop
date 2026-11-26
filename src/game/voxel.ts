@@ -152,7 +152,14 @@ export class PlayerAvatar {
     const trim = voxel(0.47, 0.035, 0.034, this.clothMat, 0, 0.38, -0.171);
     const crest = new THREE.Mesh(
       new THREE.PlaneGeometry(0.22, 0.22),
-      new THREE.MeshBasicMaterial({ map: getCrestTexture(skin.accent), transparent: true, side: THREE.DoubleSide, toneMapped: false }),
+      new THREE.MeshBasicMaterial({
+        map: getCrestTexture(skin.accent),
+        transparent: true,
+        side: THREE.DoubleSide,
+        // a flat plane: one pass draws both faces (see FLAT_TRANSPARENT note in fx.ts)
+        forceSinglePass: true,
+        toneMapped: false,
+      }),
     );
     crest.position.set(0, 0.58, -0.191);
     crest.rotation.y = Math.PI;
@@ -382,6 +389,7 @@ export class EnemyAvatar {
         opacity: 0,
         depthWrite: false,
         side: THREE.DoubleSide,
+        forceSinglePass: true, // flat ring: see FLAT_TRANSPARENT note in fx.ts
       }),
     );
     this.ring.rotation.x = -Math.PI / 2;
@@ -579,27 +587,71 @@ export function makeAmmoMesh(): THREE.Mesh {
   return mesh;
 }
 
+// Bullets share geometry and materials. There are only a handful of sizes and
+// colors, and creating (then disposing) two geometries and two materials per
+// shot made every volley re-upload buffers and re-check shaders. These caches
+// live for the whole session and are never disposed.
+const bulletGeos = new Map<string, THREE.BoxGeometry>();
+const bulletCoreMats = new Map<string, THREE.MeshStandardMaterial>();
+const bulletTrailMats = new Map<number, THREE.MeshBasicMaterial>();
+
+function bulletGeo(part: 'core' | 'trail', size: number): THREE.BoxGeometry {
+  const key = `${part}:${size}`;
+  let geo = bulletGeos.get(key);
+  if (!geo) {
+    geo =
+      part === 'core'
+        ? new THREE.BoxGeometry(0.1 * size, 0.1 * size, 0.34 * size)
+        : new THREE.BoxGeometry(0.045 * size, 0.045 * size, 0.9 * size);
+    bulletGeos.set(key, geo);
+  }
+  return geo;
+}
+
+function bulletCoreMat(color: number, emissive: number): THREE.MeshStandardMaterial {
+  const key = `${color}:${emissive}`;
+  let mat = bulletCoreMats.get(key);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: 2.4, roughness: 0.3 });
+    bulletCoreMats.set(key, mat);
+  }
+  return mat;
+}
+
+function bulletTrailMat(color: number): THREE.MeshBasicMaterial {
+  let mat = bulletTrailMats.get(color);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.45,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    bulletTrailMats.set(color, mat);
+  }
+  return mat;
+}
+
+/**
+ * A bullet is a group of two meshes built from shared resources: remove it from
+ * the scene when it dies, never dispose its geometry or materials.
+ */
 export function makeBulletMesh(color: number, trailColor: number, size: number): THREE.Group {
   const group = new THREE.Group();
-  const coreMat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 2.4,
-    roughness: 0.3,
-  });
-  const core = new THREE.Mesh(new THREE.BoxGeometry(0.1 * size, 0.1 * size, 0.34 * size), coreMat);
+  const core = new THREE.Mesh(bulletGeo('core', size), bulletCoreMat(color, color));
   group.add(core);
-  const trailMat = new THREE.MeshBasicMaterial({
-    color: trailColor,
-    transparent: true,
-    opacity: 0.45,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-  const trail = new THREE.Mesh(new THREE.BoxGeometry(0.045 * size, 0.045 * size, 0.9 * size), trailMat);
+  const trail = new THREE.Mesh(bulletGeo('trail', size), bulletTrailMat(trailColor));
   trail.position.z = -0.42 * size;
   group.add(trail);
   return group;
+}
+
+/** Recolors one bullet by switching it to other shared materials (never edits them). */
+export function recolorBulletMesh(group: THREE.Group, color: number, emissive: number, trailColor: number): void {
+  const [core, trail] = group.children as THREE.Mesh[];
+  if (core) core.material = bulletCoreMat(color, emissive);
+  if (trail) trail.material = bulletTrailMat(trailColor);
 }
 
 /** Subtle paper-like grid used on the table around the arena. */

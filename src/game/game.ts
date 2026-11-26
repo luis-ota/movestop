@@ -17,7 +17,15 @@ import {
 } from './levels';
 import { buildSandboxLevel } from './sandbox';
 import type { SkinDef, ThemeDef, TrailDef } from './catalog';
-import { BossAvatar, EnemyAvatar, PlayerAvatar, makeAmmoMesh, makeBulletMesh, makeCoinMesh } from './voxel';
+import {
+  BossAvatar,
+  EnemyAvatar,
+  PlayerAvatar,
+  makeAmmoMesh,
+  makeBulletMesh,
+  makeCoinMesh,
+  recolorBulletMesh,
+} from './voxel';
 import { FX } from './fx';
 import { audio } from './audio';
 import { buildLandscape, type Landscape } from './landscape';
@@ -298,6 +306,13 @@ export interface SandboxOptions {
   infiniteAmmo: boolean;
 }
 
+/** Menu frame interval: about 30 fps. */
+const MENU_FRAME_MS = 31;
+/** Campaign states whose scene is frozen behind a screen. */
+const STILL_STATES: ReadonlySet<GameState> = new Set<GameState>(['paused', 'briefing', 'dead', 'won', 'idle']);
+/** Frames drawn after the scene goes still, so the camera finishes settling. */
+const SETTLE_FRAMES = 60;
+
 /** How fast enemies turn to face the player, in world time. */
 const ENEMY_TURN_RATE = 9;
 /** Extra delay added to a shot that was cancelled by breaking line of sight. */
@@ -568,6 +583,7 @@ export class Game {
   }
 
   setLoadout(loadout: Loadout): void {
+    this.wake(); // a new skin or theme must show even on a still screen
     const themeChanged = loadout.theme.id !== this.loadout.theme.id;
     const skinChanged = loadout.skin.id !== this.loadout.skin.id;
     this.loadout = loadout;
@@ -682,6 +698,8 @@ export class Game {
   }
 
   private loadLevel(level: LevelDef, index: number, autoStart: boolean): void {
+    // reloading keeps the state ('briefing' -> 'briefing' on a difficulty change)
+    this.wake();
     this.currentBiomeId = getBiome(level.id).id;
     this.applyTheme(this.loadout.theme, this.currentBiomeId);
     if (!this.lowQuality) {
@@ -973,14 +991,7 @@ export class Game {
     const alive = new Set(snap.bullets.map((b) => b.id));
     for (const [id, b] of this.duelBullets) {
       if (alive.has(id)) continue;
-      this.gameGroup.remove(b.mesh);
-      b.mesh.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) {
-          m.geometry.dispose();
-          (m.material as THREE.Material).dispose();
-        }
-      });
+      this.gameGroup.remove(b.mesh); // shared resources: nothing to dispose
       this.duelBullets.delete(id);
     }
     for (const b of snap.bullets) {
@@ -1017,16 +1028,7 @@ export class Game {
   }
 
   private clearDuelBullets(): void {
-    for (const b of this.duelBullets.values()) {
-      this.gameGroup.remove(b.mesh);
-      b.mesh.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) {
-          m.geometry.dispose();
-          (m.material as THREE.Material).dispose();
-        }
-      });
-    }
+    for (const b of this.duelBullets.values()) this.gameGroup.remove(b.mesh);
     this.duelBullets.clear();
   }
 
@@ -1117,13 +1119,6 @@ export class Game {
       b.life -= simDt;
       if (b.life <= 0) {
         this.gameGroup.remove(b.mesh);
-        b.mesh.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (m.isMesh) {
-            m.geometry.dispose();
-            (m.material as THREE.Material).dispose();
-          }
-        });
         this.duelBullets.delete(id);
         continue;
       }
@@ -1242,6 +1237,7 @@ export class Game {
   }
 
   private applyTheme(theme: ThemeDef, biomeId: BiomeId = this.currentBiomeId): void {
+    this.wake();
     const air = airFor(theme.id, biomeId);
     this.scene.background = new THREE.Color(air.horizon);
     this.scene.fog = new THREE.Fog(air.horizon, air.fogNear, air.fogFar);
@@ -1256,6 +1252,7 @@ export class Game {
   }
 
   private degradeQuality(): void {
+    this.wake();
     this.lowQuality = true;
     this.bloom.enabled = false;
     this.renderer.shadowMap.enabled = false;
@@ -1279,6 +1276,8 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
     document.documentElement.style.setProperty('--viewport-height', `${h}px`);
+    // resizing clears the canvas: a still screen must draw again
+    this.wake();
   }
 
   private bindInput(): void {
@@ -1314,11 +1313,8 @@ export class Game {
       const r = this.canvas.getBoundingClientRect();
       this.pointer.x = ((e.clientX - r.left) / r.width) * 2 - 1;
       this.pointer.y = -((e.clientY - r.top) / r.height) * 2 + 1;
-      const ui = document.getElementById('ui');
-      if (ui) {
-        ui.style.setProperty('--cursor-x', `${e.clientX}px`);
-        ui.style.setProperty('--cursor-y', `${e.clientY}px`);
-      }
+      // No CSS custom properties here: writing them on #ui made every mouse move
+      // restyle the whole HUD (~2 ms each). The crosshair positions itself in ui.ts.
     });
   }
 
@@ -1628,14 +1624,8 @@ export class Game {
     b.fromEnemy = null;
     b.life = 3;
     b.mesh.rotation.y = a;
-    b.mesh.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      if (!mat) return;
-      if (mat.color) mat.color.setHex(0xffd23f);
-      if (mat.emissive) mat.emissive.setHex(0xffb01c);
-    });
+    // bullet materials are shared: switch this one to the gold set, never repaint in place
+    recolorBulletMesh(b.mesh, 0xffd23f, 0xffb01c, 0xffd23f);
     this.fx.sparks(b.x, 0.55, b.z, 0xffd23f, 4, 3);
   }
 
@@ -2623,13 +2613,28 @@ export class Game {
     group.position.set(x, 0, z);
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(radius, 40),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
+      // flat on the ground: one pass draws both faces (see FLAT_TRANSPARENT in fx.ts)
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+      }),
     );
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = 0.035;
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(radius * 0.88, radius, 48),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.7,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+      }),
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.045;
@@ -2892,15 +2897,8 @@ export class Game {
 
   private removeBullet(b: Bullet): void {
     b.alive = false;
+    // geometry and materials are shared (see makeBulletMesh): only leave the scene
     this.gameGroup.remove(b.mesh);
-    b.mesh.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (m.isMesh) {
-        m.geometry.dispose();
-        const mat = m.material as THREE.Material;
-        mat.dispose();
-      }
-    });
   }
 
   private damageEnemy(e: Enemy, amount: number): void {
@@ -3277,6 +3275,8 @@ export class Game {
   private loop = (): void => {
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
+    // the menu only drifts the camera: ~30 fps is enough and halves its cost
+    if (this.mode === 'menu' && now - this.lastFrame < MENU_FRAME_MS) return;
     const dt = Math.min((now - this.lastFrame) / 1000, 0.05);
     this.lastFrame = now;
     this.realTime += dt;
@@ -3324,12 +3324,50 @@ export class Game {
       }
     }
 
+    if (!this.shouldRender()) return;
     if (this.lowQuality) {
       this.renderer.render(this.scene, this.camera);
     } else {
       this.composer.render();
     }
   };
+
+  /** Frames still to draw after the scene went still (camera settling, last effects). */
+  private settleFrames = SETTLE_FRAMES;
+  private lastRenderedState: GameState | null = null;
+  private lastRenderedMode: 'menu' | 'game' | 'duel' | null = null;
+
+  /** Forces the next frames to draw, e.g. after a resize cleared the canvas. */
+  private wake(): void {
+    this.settleFrames = SETTLE_FRAMES;
+  }
+
+  /**
+   * Campaign screens that sit over a frozen scene (pause, briefing, death, win)
+   * stop redrawing once nothing moves: no effects alive, no shake, and about a
+   * second for the camera to settle. Playing, dying, the duel and the menu
+   * always draw. Any state or mode change draws again.
+   */
+  private shouldRender(): boolean {
+    if (this.state !== this.lastRenderedState || this.mode !== this.lastRenderedMode) {
+      this.lastRenderedState = this.state;
+      this.lastRenderedMode = this.mode;
+      this.wake();
+    }
+    const still =
+      this.mode === 'game' &&
+      STILL_STATES.has(this.state) &&
+      this.shake <= 0 &&
+      // a paused scene keeps its effects frozen in place, so they do not count as motion
+      (this.state === 'paused' || this.fx.isIdle());
+    if (!still) {
+      this.wake();
+      return true;
+    }
+    if (this.settleFrames <= 0) return false;
+    this.settleFrames--;
+    return true;
+  }
 
   private winSent = false;
   private deathSent = false;

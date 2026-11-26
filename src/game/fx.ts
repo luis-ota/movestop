@@ -46,6 +46,38 @@ interface Ghost {
 
 const MAX_PARTICLES = 240;
 
+/**
+ * FLAT_TRANSPARENT: three.js draws a transparent DoubleSide material in two
+ * passes (back, then front) and flags `needsUpdate` for each, every frame:
+ * twice the draw calls and a shader re-check per object. Every such material
+ * in this game is a flat plane or ring, where one pass already draws both faces
+ * correctly, so they all set `forceSinglePass`.
+ */
+const FLAT_TRANSPARENT = { transparent: true, side: THREE.DoubleSide, forceSinglePass: true } as const;
+
+/**
+ * Reuses short-lived effect materials. Creating a material per effect made
+ * three.js re-evaluate (and re-cache) its shader on the first frame each time;
+ * a recycled material keeps its program. Every material in one pool shares the
+ * same flags, so only color, opacity and map change between uses.
+ */
+class MaterialPool {
+  private free: THREE.MeshBasicMaterial[] = [];
+
+  constructor(private readonly make: () => THREE.MeshBasicMaterial) {}
+
+  take(color: number, opacity: number): THREE.MeshBasicMaterial {
+    const mat = this.free.pop() ?? this.make();
+    mat.color.setHex(color);
+    mat.opacity = opacity;
+    return mat;
+  }
+
+  give(mat: THREE.MeshBasicMaterial): void {
+    this.free.push(mat);
+  }
+}
+
 /** Tiny voxel debris, sparks and shockwaves. No texture assets. */
 export class FX {
   readonly group = new THREE.Group();
@@ -58,6 +90,24 @@ export class FX {
   private ringTex: THREE.CanvasTexture | null = null;
   private geo = new THREE.BoxGeometry(1, 1, 1);
   private ringGeo = new THREE.RingGeometry(0.82, 1, 40);
+  private planeGeo = new THREE.PlaneGeometry(1, 1);
+  private ringMats = new MaterialPool(
+    () => new THREE.MeshBasicMaterial({ ...FLAT_TRANSPARENT, depthWrite: false }),
+  );
+  private ghostMats = new MaterialPool(
+    () =>
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+  );
+  private arcMats = new MaterialPool(
+    () =>
+      new THREE.MeshBasicMaterial({
+        ...FLAT_TRANSPARENT,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+  );
   private mats = new Map<number, THREE.MeshStandardMaterial>();
   private rnd = Math.random;
 
@@ -137,14 +187,7 @@ export class FX {
   }
 
   ring(x: number, z: number, color: number, radius = 1, life = 0.5): void {
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.8,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(this.ringGeo, mat);
+    const mesh = new THREE.Mesh(this.ringGeo, this.ringMats.take(color, 0.8));
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(x, 0.04, z);
     mesh.scale.setScalar(radius * 0.35);
@@ -198,18 +241,10 @@ export class FX {
   }
 
   private addArc(x: number, z: number, angle: number, color: number, radius: number, finisher: boolean): void {
-    const mat = new THREE.MeshBasicMaterial({
-      map: this.getSlashTexture(finisher),
-      color: 0xfff3dd,
-      transparent: true,
-      opacity: 1,
-      depthWrite: false,
-      depthTest: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      toneMapped: false,
-    });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    const mat = this.arcMats.take(0xfff3dd, 1);
+    // both slash textures are sRGB canvases, so swapping the map keeps the same shader
+    mat.map = this.getSlashTexture(finisher);
+    const mesh = new THREE.Mesh(this.planeGeo, mat);
     mesh.position.set(x + Math.sin(angle) * 1.3, 0.82, z + Math.cos(angle) * 1.3);
     mesh.scale.setScalar(radius * 3.0);
     mesh.rotation.z = angle - Math.PI / 2;
@@ -226,19 +261,17 @@ export class FX {
     const mainGeo = new THREE.RingGeometry(radius * 0.42, radius, 48, 1, start, span);
     const edgeGeo = new THREE.RingGeometry(radius * 0.9, radius * 1.02, 48, 1, start + 0.03, Math.max(0.1, span - 0.06));
     const mainMat = new THREE.MeshBasicMaterial({
+      ...FLAT_TRANSPARENT,
       color,
-      transparent: true,
       opacity: 0.8,
       depthWrite: false,
-      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
     const edgeMat = new THREE.MeshBasicMaterial({
+      ...FLAT_TRANSPARENT,
       color: 0xfff3da,
-      transparent: true,
       opacity: 0.9,
       depthWrite: false,
-      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
     });
     const main = new THREE.Mesh(mainGeo, mainMat);
@@ -315,13 +348,7 @@ export class FX {
       [0.14, 0.3, 0.17, 0.13, 0.15, 0],
     ];
     for (const [w, h, d, px, py, pz] of parts) {
-      const mat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.34,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
+      const mat = this.ghostMats.take(color, 0.34);
       const mesh = new THREE.Mesh(this.geo, mat);
       mesh.scale.set(w, h, d);
       mesh.position.set(px, py, pz);
@@ -419,8 +446,7 @@ export class FX {
       a.life -= dt;
       if (a.life <= 0) {
         this.group.remove(a.mesh);
-        a.mesh.geometry.dispose();
-        a.mat.dispose();
+        this.arcMats.give(a.mat);
         this.arcs.splice(i, 1);
         continue;
       }
@@ -460,7 +486,7 @@ export class FX {
       g.life -= dt;
       if (g.life <= 0) {
         this.group.remove(g.group);
-        for (const m of g.materials) m.dispose();
+        for (const m of g.materials) this.ghostMats.give(m);
         this.ghosts.splice(i, 1);
         continue;
       }
@@ -473,7 +499,7 @@ export class FX {
       r.life -= dt;
       if (r.life <= 0) {
         this.group.remove(r.mesh);
-        (r.mesh.material as THREE.Material).dispose();
+        this.ringMats.give(r.mesh.material as THREE.MeshBasicMaterial);
         this.rings.splice(i, 1);
         continue;
       }
@@ -483,12 +509,23 @@ export class FX {
     }
   }
 
+  /** True when no effect is alive (nothing left to animate). */
+  isIdle(): boolean {
+    return (
+      this.particles.length === 0 &&
+      this.rings.length === 0 &&
+      this.slashes.length === 0 &&
+      this.ghosts.length === 0 &&
+      this.arcs.length === 0
+    );
+  }
+
   clear(): void {
     for (const p of this.particles) this.group.remove(p.mesh);
     this.particles.length = 0;
     for (const r of this.rings) {
       this.group.remove(r.mesh);
-      (r.mesh.material as THREE.Material).dispose();
+      this.ringMats.give(r.mesh.material as THREE.MeshBasicMaterial);
     }
     this.rings.length = 0;
     for (const s of this.slashes) {
@@ -504,13 +541,12 @@ export class FX {
     this.slashes.length = 0;
     for (const g of this.ghosts) {
       this.group.remove(g.group);
-      for (const m of g.materials) m.dispose();
+      for (const m of g.materials) this.ghostMats.give(m);
     }
     this.ghosts.length = 0;
     for (const a of this.arcs) {
       this.group.remove(a.mesh);
-      a.mesh.geometry.dispose();
-      a.mat.dispose();
+      this.arcMats.give(a.mat);
     }
     this.arcs.length = 0;
   }

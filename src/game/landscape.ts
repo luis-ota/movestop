@@ -1350,7 +1350,16 @@ export function buildLandscape(opts: LandscapeOptions): Landscape {
     const smokeTex = new THREE.CanvasTexture(sc);
     backdropTextures.push(smokeTex);
     smokeTex.colorSpace = THREE.SRGBColorSpace;
-    const smokeMat = new THREE.MeshBasicMaterial({ map: smokeTex, transparent: true, depthWrite: false, opacity: 0.7, fog: false, side: THREE.DoubleSide });
+    const smokeMat = new THREE.MeshBasicMaterial({
+      map: smokeTex,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.7,
+      fog: false,
+      side: THREE.DoubleSide,
+      // flat planes: one pass draws both faces (see FLAT_TRANSPARENT in fx.ts)
+      forceSinglePass: true,
+    });
     for (const [x, z, h] of [[sx, sz, 18], [sx + 18, sz - 6, 26], [sx - 22, sz - 9, 22]] as const) {
       const smoke = new THREE.Mesh(new THREE.PlaneGeometry(9, h), smokeMat);
       smoke.position.set(x, h * 0.45, z);
