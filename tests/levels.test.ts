@@ -12,7 +12,9 @@ describe('campanha', () => {
   it('liga cada comportamento da IA aos tipos certos', () => {
     // updateEnemies escolhe o comportamento pela presença do bloco de ajuste,
     // então cada bloco precisa existir exatamente nestes tipos.
-    const typesWith = (key: 'kite' | 'reposition' | 'laser' | 'bash' | 'lunge' | 'mortar' | 'wards') =>
+    const typesWith = (
+      key: 'kite' | 'reposition' | 'laser' | 'bash' | 'lunge' | 'mortar' | 'wards' | 'stalk' | 'strike' | 'cloak',
+    ) =>
       Object.values(ENEMY_DEFS)
         .filter((def) => def[key] !== undefined)
         .map((def) => def.type)
@@ -24,6 +26,30 @@ describe('campanha', () => {
     expect(typesWith('lunge')).toEqual(['hunter']);
     expect(typesWith('mortar')).toEqual(['mortar']);
     expect(typesWith('wards')).toEqual(['warden']);
+    expect(typesWith('stalk')).toEqual(['statue']);
+    expect(typesWith('strike')).toEqual(['ninja']);
+    expect(typesWith('cloak')).toEqual(['ninja']);
+  });
+
+  it('a estátua anda no relógio invertido e os outros no do mundo', () => {
+    for (const def of Object.values(ENEMY_DEFS)) {
+      expect(def.clock ?? 'world').toBe(def.type === 'statue' ? 'inverted' : 'world');
+    }
+  });
+
+  it('o agarrão da estátua alcança além de onde ela decide agarrar', () => {
+    // senão um jogador parado na borda do gatilho nunca seria atingido
+    const stalk = ENEMY_DEFS.statue.stalk!;
+    expect(stalk.hitRange).toBeGreaterThan(stalk.triggerRange);
+    const strike = ENEMY_DEFS.ninja.strike!;
+    expect(strike.hitRange).toBeGreaterThan(strike.triggerRange);
+    expect(strike.flankOffset).toBeLessThan(strike.triggerRange);
+  });
+
+  it('a estátua e o ninja ainda não entram na campanha', () => {
+    const used = new Set(LEVELS.flatMap((level) => level.waves.flat().map((spawn) => spawn.type)));
+    expect(used.has('statue')).toBe(false);
+    expect(used.has('ninja')).toBe(false);
   });
 
   it('introduz morteiro e monge em fases diferentes', () => {

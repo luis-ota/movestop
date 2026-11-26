@@ -37,6 +37,13 @@ describe('difficulty', () => {
     expect(enemyHpFor('warden', 'impossible')).toBe(4);
   });
 
+  it('a estátua de pedra tem vida fixa; o ninja escala como os outros', () => {
+    expect(enemyHpFor('statue', 'easy')).toBe(2);
+    expect(enemyHpFor('statue', 'impossible')).toBe(2);
+    expect(enemyHpFor('ninja', 'hard')).toBe(1);
+    expect(enemyHpFor('ninja', 'impossible')).toBe(3);
+  });
+
   it('aperta aparo, invulnerabilidade e contato no Impossível', () => {
     expect(DIFFICULTIES.easy.parryWindow).toBeGreaterThan(DIFFICULTIES.hard.parryWindow);
     expect(DIFFICULTIES.hard.parryWindow).toBeGreaterThan(DIFFICULTIES.impossible.parryWindow);

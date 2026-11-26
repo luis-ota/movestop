@@ -266,8 +266,15 @@ export class EnemyAvatar {
   private ring: THREE.Mesh;
   private phase = 0;
   private flashValue = 0;
+  /** stone does not breathe: no idle bob */
+  private readonly still: boolean;
+  /** materials that fade with setOpacity, with their resting opacity */
+  private fadeMats: { mat: THREE.Material; base: number }[] = [];
+  private fadeMeshes: THREE.Mesh[] = [];
+  private opacity = 1;
 
   constructor(accent: number, body: number, scale: number, type: string) {
+    this.still = type === 'statue';
     this.phase = Math.random() * Math.PI * 2;
     this.bodyMat = new THREE.MeshStandardMaterial({ color: body, roughness: 0.62, metalness: 0.1 });
     this.darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2026, roughness: 0.72 });
@@ -291,7 +298,9 @@ export class EnemyAvatar {
     const hornR = voxel(0.055, 0.18, 0.055, this.darkMat, 0.14, 1.06, 0);
     hornR.rotation.z = -0.35;
     const knot = voxel(0.08, 0.08, 0.08, this.bodyMat, 0, 1.03, -0.05);
-    this.group.add(legL, legR, torso, shoulder, head, mask, this.eyeL, this.eyeR, hornL, hornR, knot);
+    this.group.add(legL, legR, torso, shoulder, head, mask, this.eyeL, this.eyeR, knot);
+    // the statue and the ninja have their own head silhouettes
+    if (type !== 'statue' && type !== 'ninja') this.group.add(hornL, hornR);
 
     const gunMat = new THREE.MeshStandardMaterial({ color: 0x3a3138, roughness: 0.4, metalness: 0.4 });
     const accentMat = new THREE.MeshStandardMaterial({
@@ -343,6 +352,26 @@ export class EnemyAvatar {
       talisman.rotation.z = -0.12;
       this.group.add(hat, sleeveL, sleeveR, staff, talisman);
     }
+    if (type === 'statue') {
+      // a roadside jizō: rounded stone cap, red bib, hands folded, a plinth under the feet
+      this.bodyMat.roughness = 0.96;
+      this.bodyMat.metalness = 0;
+      const bibMat = new THREE.MeshStandardMaterial({ color: 0xb8322a, roughness: 0.8 });
+      const cap = voxel(0.4, 0.1, 0.36, this.bodyMat, 0, 1.04, 0);
+      const bib = voxel(0.46, 0.22, 0.05, bibMat, 0, 0.6, 0.18);
+      const hands = voxel(0.18, 0.12, 0.1, this.bodyMat, 0, 0.47, 0.2);
+      const plinth = voxel(0.66, 0.1, 0.52, this.darkMat, 0, 0.05, 0);
+      this.group.add(cap, bib, hands, plinth);
+    }
+    if (type === 'ninja') {
+      const hood = voxel(0.38, 0.12, 0.34, this.darkMat, 0, 0.99, 0);
+      const scarf = voxel(0.06, 0.06, 0.34, accentMat, 0, 0.95, -0.3);
+      scarf.rotation.x = 0.3;
+      const sheath = voxel(0.05, 0.85, 0.05, gunMat, 0, 0.6, -0.2);
+      sheath.rotation.z = 0.7;
+      const blade = voxel(0.04, 0.05, 0.42, accentMat, 0.3, 0.5, 0.2);
+      this.group.add(hood, scarf, sheath, blade);
+    }
 
     this.group.add(contactShadow(0.86));
     this.ring = new THREE.Mesh(
@@ -359,6 +388,33 @@ export class EnemyAvatar {
     this.ring.position.y = 0.015;
     this.group.add(this.ring);
     this.group.scale.setScalar(scale);
+
+    if (type === 'ninja') {
+      // cloaked bodies render transparent from the start so fading never recompiles shaders
+      const seen = new Set<THREE.Material>();
+      this.group.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || mesh === this.ring) return;
+        this.fadeMeshes.push(mesh);
+        const mat = mesh.material as THREE.Material;
+        if (seen.has(mat)) return;
+        seen.add(mat);
+        mat.transparent = true;
+        this.fadeMats.push({ mat, base: mat.opacity });
+      });
+    }
+  }
+
+  /** 0..1. Only cloaked enemies (built with fade materials) react. */
+  setOpacity(v: number): void {
+    if (this.fadeMats.length === 0 || Math.abs(v - this.opacity) < 0.002) return;
+    this.opacity = v;
+    for (const { mat, base } of this.fadeMats) mat.opacity = base * v;
+    // a fully shaded silhouette would give the hidden body away on desktop only
+    const shadow = v > 0.5;
+    for (const mesh of this.fadeMeshes) {
+      if (mesh.castShadow !== shadow && mesh.geometry === box) mesh.castShadow = shadow;
+    }
   }
 
   setCharge(v: number): void {
@@ -377,7 +433,7 @@ export class EnemyAvatar {
 
   animate(dt: number, timeScale: number): void {
     this.phase += dt * (1.4 + timeScale * 2.5);
-    this.group.position.y = Math.sin(this.phase) * 0.012;
+    this.group.position.y = this.still ? 0 : Math.sin(this.phase) * 0.012;
     this.flashValue = Math.max(0, this.flashValue - dt * 5);
     this.bodyMat.emissive.setRGB(this.flashValue * 0.9, this.flashValue * 0.55, this.flashValue * 0.2);
     this.bodyMat.emissiveIntensity = this.flashValue * 1.8;

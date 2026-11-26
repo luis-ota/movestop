@@ -1,4 +1,4 @@
-import type { EnemyType } from './levels';
+import { ENEMY_DEFS, type EnemyType } from './levels';
 
 export type Difficulty = 'easy' | 'hard' | 'impossible';
 
@@ -93,9 +93,9 @@ export function getDifficulty(value: Difficulty | undefined): DifficultyDef {
 }
 
 export function enemyHpFor(type: EnemyType, difficulty: Difficulty): number {
-  const base = type === 'shield' ? 2 : type === 'mortar' || type === 'warden' ? 2 : 1;
-  if (type === 'shield') return base;
-  return base + getDifficulty(difficulty).enemyHpBonus;
+  const def = ENEMY_DEFS[type];
+  if (def.fixedHp) return def.hp;
+  return def.hp + getDifficulty(difficulty).enemyHpBonus;
 }
 
 export function playerMaxHpFor(base: number, difficulty: Difficulty): number {

@@ -1,9 +1,30 @@
-export type EnemyType = 'gunner' | 'burster' | 'sniper' | 'shield' | 'hunter' | 'mortar' | 'warden';
+export type EnemyType =
+  | 'gunner'
+  | 'burster'
+  | 'sniper'
+  | 'shield'
+  | 'hunter'
+  | 'mortar'
+  | 'warden'
+  | 'statue'
+  | 'ninja';
+
+/**
+ * Which clock a timer runs on:
+ * - 'world' advances only while the player moves (simDt);
+ * - 'real' always advances (realDt);
+ * - 'inverted' advances only while the player stands still (realDt - simDt).
+ */
+export type Clock = 'world' | 'real' | 'inverted';
 
 export interface EnemyDef {
   type: EnemyType;
   label: string;
+  /** base HP; difficulty adds `enemyHpBonus` unless `fixedHp` is set */
   hp: number;
+  fixedHp?: boolean;
+  /** clock for the body (spawn grace, turning, movement). Defaults to 'world'. */
+  clock?: Clock;
   radius: number;
   fireEvery: number;
   windup: number;
@@ -30,6 +51,51 @@ export interface EnemyDef {
   lunge?: LungeTuning;
   mortar?: MortarTuning;
   wards?: WardTuning;
+  stalk?: StalkTuning;
+  strike?: StrikeTuning;
+  cloak?: CloakTuning;
+}
+
+/**
+ * Statue: walks on the body clock (inverted), then grabs. The grab windup runs
+ * on the same clock, so moving always freezes it.
+ */
+export interface StalkTuning {
+  speed: number;
+  triggerRange: number;
+  windup: number;
+  minWindupMult: number;
+  hitRange: number;
+  /** after a grab, before it can walk again */
+  recovery: number;
+  /** stone: bullets push it back instead of hurting it */
+  bulletPush: number;
+}
+
+/**
+ * Ninja: tries to reach the player's back, then strikes in world time. A
+ * parry during the strike kills it.
+ */
+export interface StrikeTuning {
+  speed: number;
+  /** how far behind the player it aims to stand */
+  flankOffset: number;
+  triggerRange: number;
+  windup: number;
+  minWindupMult: number;
+  hitRange: number;
+  halfArc: number;
+  recovery: number;
+}
+
+/** Fades out while the world runs and shows itself when time stops. */
+export interface CloakTuning {
+  /** opacity while time runs at full speed */
+  minOpacity: number;
+  /** hidden from the radar below this opacity */
+  radarAbove: number;
+  /** seconds of world time between dust puffs while it moves cloaked */
+  trailEvery: number;
 }
 
 /** Ranged enemies: strafe while in sight, keep a band of distance, seek when blind. */
@@ -179,6 +245,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     type: 'shield',
     label: 'ESCUDO',
     hp: 2,
+    fixedHp: true,
     radius: 0.38,
     fireEvery: 3.0,
     windup: 0.7,
@@ -273,6 +340,66 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     scale: 0.98,
     kite: KITE,
     wards: { count: 3, spacing: 1.8, maxDistance: 8, radius: 1.05, fuse: 0.28 },
+  },
+  statue: {
+    type: 'statue',
+    label: 'ESTÁTUA',
+    hp: 2,
+    fixedHp: true,
+    clock: 'inverted',
+    radius: 0.4,
+    fireEvery: 99,
+    windup: 0,
+    bulletSpeed: 0,
+    lead: 0,
+    burst: 0,
+    burstGap: 0,
+    spread: 0,
+    moveSpeed: 1.25,
+    strafe: 0,
+    sightRange: 40,
+    color: 0x8fe3c4,
+    body: 0x8c8a82,
+    scale: 1.14,
+    stalk: {
+      speed: 1.25,
+      triggerRange: 1.2,
+      windup: 0.45,
+      minWindupMult: 0.75,
+      hitRange: 1.5,
+      recovery: 0.8,
+      bulletPush: 0.35,
+    },
+  },
+  ninja: {
+    type: 'ninja',
+    label: 'SOMBRA',
+    hp: 1,
+    radius: 0.32,
+    fireEvery: 99,
+    windup: 0,
+    bulletSpeed: 0,
+    lead: 0,
+    burst: 0,
+    burstGap: 0,
+    spread: 0,
+    moveSpeed: 4,
+    strafe: 0,
+    sightRange: 40,
+    color: 0xb48cff,
+    body: 0x2b2a3a,
+    scale: 0.94,
+    strike: {
+      speed: 1.9,
+      flankOffset: 1.3,
+      triggerRange: 1.6,
+      windup: 0.5,
+      minWindupMult: 0.75,
+      hitRange: 1.75,
+      halfArc: 0.9,
+      recovery: 0.9,
+    },
+    cloak: { minOpacity: 0.07, radarAbove: 0.5, trailEvery: 0.28 },
   },
 };
 

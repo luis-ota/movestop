@@ -3,7 +3,18 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { ENEMY_DEFS, LEVELS, LevelDef, EnemyType, totalWaves, expandLevel } from './levels';
+import {
+  ENEMY_DEFS,
+  LEVELS,
+  LevelDef,
+  EnemyType,
+  totalWaves,
+  expandLevel,
+  type Clock,
+  type CloakTuning,
+  type StalkTuning,
+  type StrikeTuning,
+} from './levels';
 import { buildSandboxLevel } from './sandbox';
 import type { SkinDef, ThemeDef, TrailDef } from './catalog';
 import { BossAvatar, EnemyAvatar, PlayerAvatar, makeAmmoMesh, makeBulletMesh, makeCoinMesh } from './voxel';
@@ -169,7 +180,12 @@ interface Enemy {
   windup: number;
   windupMax: number;
   windupClock: Clock;
-  attackKind: 'shot' | 'bash' | 'lunge' | 'mortar' | 'wards';
+  attackKind: 'shot' | 'bash' | 'lunge' | 'mortar' | 'wards' | 'grab' | 'strike';
+  /** cooldown after a grab/strike, on the enemy's body clock */
+  attackCd: number;
+  /** 0..1; below 1 only for cloaked enemies */
+  visibility: number;
+  trailTimer: number;
   aimAngle: number;
   bashRecovery: number;
   burstLeft: number;
@@ -269,14 +285,12 @@ const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const damp = (v: number, target: number, lambda: number, dt: number) =>
   v + (target - v) * (1 - Math.exp(-lambda * dt));
 
-/**
- * Which clock a timer runs on: 'world' advances only while the player moves
- * (simDt); 'real' always advances (realDt).
- */
-type Clock = 'world' | 'real';
-
+/** Elapsed seconds on a clock this frame (see `Clock` in levels.ts). */
 function clockDt(clock: Clock, simDt: number, realDt: number): number {
-  return clock === 'real' ? realDt : simDt;
+  if (clock === 'real') return realDt;
+  // simDt = realDt * timeScale, so this is realDt * (1 - timeScale)
+  if (clock === 'inverted') return Math.max(0, realDt - simDt);
+  return simDt;
 }
 
 export interface SandboxOptions {
@@ -1980,6 +1994,9 @@ export class Game {
       alive: true,
       avatar,
       fireTimer: 1.1 + Math.random() * 1.2,
+      attackCd: 0,
+      visibility: 1,
+      trailTimer: 0,
       windup: 0,
       windupMax: 0,
       windupClock: 'world',
@@ -2229,8 +2246,12 @@ export class Game {
       e.avatar.group.position.z = e.z;
       e.avatar.animate(realDt, this.timeScale);
       e.bashRecovery = Math.max(0, e.bashRecovery - realDt);
+      // the body clock drives grace, turning and movement ('world' for everyone but the statue)
+      const bodyDt = clockDt(e.def.clock ?? 'world', simDt, realDt);
+      const cloak = e.def.cloak;
+      if (cloak) this.updateCloak(e, cloak, simDt, realDt);
       if (e.grace > 0) {
-        e.grace -= simDt;
+        e.grace -= bodyDt;
         e.avatar.setCharge(0);
         continue;
       }
@@ -2240,7 +2261,7 @@ export class Game {
       const dirX = dx / dist;
       const dirZ = dz / dist;
       const targetAngle = Math.atan2(dirX, dirZ);
-      e.angle = angleLerp(e.angle, targetAngle, Math.min(1, simDt * ENEMY_TURN_RATE));
+      e.angle = angleLerp(e.angle, targetAngle, Math.min(1, bodyDt * ENEMY_TURN_RATE));
       e.avatar.group.rotation.y = e.angle;
       const see = this.hasLOS(e.x, e.z, p.x, p.z) && dist < e.def.sightRange;
       const lunge = e.def.lunge;
@@ -2290,6 +2311,10 @@ export class Game {
             audio.slash(true);
           } else if (e.attackKind === 'wards') {
             this.placeWards(e);
+          } else if (e.attackKind === 'grab') {
+            this.statueGrab(e, dist);
+          } else if (e.attackKind === 'strike') {
+            this.ninjaStrike(e, dist);
           }
           if (e.laser) e.laser.visible = false;
           if (e.laserMat) e.laserMat.opacity = 0;
@@ -2312,6 +2337,17 @@ export class Game {
       }
 
       // movement and attack commitment
+      const stalk = e.def.stalk;
+      if (stalk) {
+        this.updateStalker(e, stalk, bodyDt, dist, dirX, dirZ, targetAngle, see);
+        continue;
+      }
+      const strike = e.def.strike;
+      if (strike) {
+        this.updateStriker(e, strike, simDt, dist, targetAngle, see);
+        continue;
+      }
+
       if (lunge) {
         e.lungeCd = Math.max(0, e.lungeCd - simDt);
         if (e.lungeTime > 0) {
@@ -2418,6 +2454,130 @@ export class Game {
     this.shake = Math.max(this.shake, 0.2);
     if (dist < bash.hitRange && inCone(e.x, e.z, e.aimAngle, p.x, p.z, bash.halfArc) && this.hasLOS(e.x, e.z, p.x, p.z)) {
       this.hitPlayer();
+    }
+  }
+
+  /**
+   * Statue: its body clock is inverted, so it walks only while the player
+   * stands still and freezes the moment they move, mid-step or mid-grab.
+   */
+  private updateStalker(
+    e: Enemy,
+    stalk: StalkTuning,
+    bodyDt: number,
+    dist: number,
+    dirX: number,
+    dirZ: number,
+    targetAngle: number,
+    see: boolean,
+  ): void {
+    e.attackCd = Math.max(0, e.attackCd - bodyDt);
+    if (e.attackCd > 0) return;
+    if (see && dist < stalk.triggerRange) {
+      e.attackKind = 'grab';
+      e.windupClock = 'inverted';
+      e.windup = stalk.windup * Math.max(stalk.minWindupMult, this.difficulty.enemyWindupMult);
+      e.windupMax = e.windup;
+      e.aimAngle = targetAngle;
+      e.charge = 0;
+      this.fx.ring(e.x, e.z, e.def.color, stalk.hitRange, 0.5);
+      this.tryEnemySfx();
+      return;
+    }
+    this.seekEnemy(e, dirX, dirZ, stalk.speed * this.difficulty.enemySpeedMult, bodyDt);
+    // the eyes glow while it is awake, which is exactly while the player is still
+    e.avatar.setCharge(0.35 * (1 - this.timeScale));
+  }
+
+  private statueGrab(e: Enemy, dist: number): void {
+    const p = this.player!;
+    const stalk = e.def.stalk;
+    if (!stalk) return;
+    e.attackCd = stalk.recovery;
+    this.fx.slash(e.x, e.z, e.aimAngle, e.def.color, stalk.hitRange, false);
+    audio.slash(true);
+    this.shake = Math.max(this.shake, 0.25);
+    // an embrace, not a swing: no cone, only reach and sight
+    if (dist < stalk.hitRange && this.hasLOS(e.x, e.z, p.x, p.z)) this.hitPlayer();
+  }
+
+  /**
+   * Ninja: circles to the player's back and strikes in world time. Standing
+   * still freezes the strike in plain view; a parry facing it kills the ninja.
+   */
+  private updateStriker(
+    e: Enemy,
+    strike: StrikeTuning,
+    simDt: number,
+    dist: number,
+    targetAngle: number,
+    see: boolean,
+  ): void {
+    const p = this.player!;
+    e.attackCd = Math.max(0, e.attackCd - simDt);
+    if (e.attackCd <= 0 && see && dist < strike.triggerRange) {
+      e.attackKind = 'strike';
+      e.windupClock = 'world';
+      e.windup = strike.windup * Math.max(strike.minWindupMult, this.difficulty.enemyWindupMult);
+      e.windupMax = e.windup;
+      e.aimAngle = targetAngle;
+      e.charge = 0;
+      this.fx.ring(e.x, e.z, e.def.color, strike.hitRange, 0.45);
+      this.tryEnemySfx();
+      return;
+    }
+    // aim for the point `flankOffset` behind where the player is facing
+    const tx = p.x - Math.sin(p.angle) * strike.flankOffset;
+    const tz = p.z - Math.cos(p.angle) * strike.flankOffset;
+    const gx = tx - e.x;
+    const gz = tz - e.z;
+    const gd = Math.hypot(gx, gz);
+    if (gd > 0.15) this.seekEnemy(e, gx / gd, gz / gd, strike.speed * this.difficulty.enemySpeedMult, simDt);
+    e.avatar.setCharge(0);
+  }
+
+  private ninjaStrike(e: Enemy, dist: number): void {
+    const p = this.player!;
+    const strike = e.def.strike;
+    if (!strike) return;
+    e.attackCd = strike.recovery;
+    // a parry facing the blade turns the strike into the ninja's death
+    if (p.parryTime > 0 && dist < strike.hitRange + 0.4 && inCone(p.x, p.z, p.angle, e.x, e.z, 1.3)) {
+      p.parryTime = 0;
+      this.fx.ring(p.x, p.z, 0x2ee6d0, p.parryRadius * 0.9, 0.36);
+      this.fx.sparks(e.x, 0.6, e.z, 0x2ee6d0, 10, 5);
+      this.shake = Math.max(this.shake, 0.2);
+      audio.parry();
+      this.focus = Math.min(100, this.focus + 6);
+      this.damageEnemy(e, e.hp);
+      return;
+    }
+    this.fx.slash(e.x, e.z, e.aimAngle, e.def.color, strike.hitRange, false);
+    audio.slash(true);
+    if (
+      dist < strike.hitRange &&
+      inCone(e.x, e.z, e.aimAngle, p.x, p.z, strike.halfArc) &&
+      this.hasLOS(e.x, e.z, p.x, p.z)
+    ) {
+      this.hitPlayer();
+    }
+  }
+
+  /**
+   * Cloak: fades while the world runs and shows itself when time stops. A
+   * strike being charged is always fully visible, so no hit comes unseen.
+   */
+  private updateCloak(e: Enemy, cloak: CloakTuning, simDt: number, realDt: number): void {
+    const striking = e.windup > 0 && e.attackKind === 'strike';
+    const target = striking ? 1 : 1 - (1 - cloak.minOpacity) * this.timeScale;
+    e.visibility = damp(e.visibility, target, 14, realDt);
+    e.avatar.setOpacity(e.visibility);
+    if (e.visibility >= cloak.radarAbove || simDt <= 0) return;
+    // while hidden it still disturbs the ground: the trail is the clue
+    e.trailTimer -= simDt;
+    if (e.trailTimer <= 0) {
+      e.trailTimer = cloak.trailEvery;
+      this.fx.dust(e.x, e.z, 0x9a90a8, 2);
     }
   }
 
@@ -2627,6 +2787,11 @@ export class Game {
           const px = x0 + dx * t;
           const pz = z0 + dz * t;
           if (Math.hypot(px - e.x, pz - e.z) > e.def.radius + 0.06) continue;
+          if (e.def.stalk) {
+            this.deflectOffStone(e, b, px, pz);
+            hitSomething = true;
+            break;
+          }
           if (e.type === 'shield') {
             const fwdX = Math.sin(e.angle);
             const fwdZ = Math.cos(e.angle);
@@ -2666,8 +2831,12 @@ export class Game {
             const px = x0 + dx * t;
             const pz = z0 + dz * t;
             if (Math.hypot(px - e.x, pz - e.z) <= e.def.radius + 0.05) {
-              this.damageEnemy(e, 1);
-              this.removeBullet(b);
+              if (e.def.stalk) {
+                this.deflectOffStone(e, b, px, pz);
+              } else {
+                this.damageEnemy(e, 1);
+                this.removeBullet(b);
+              }
               hitSomething = true;
               break;
             }
@@ -2709,6 +2878,16 @@ export class Game {
     }
     // dead bullets used to pile up in the array for the whole level
     if (this.bullets.some((b) => !b.alive)) this.bullets = this.bullets.filter((b) => b.alive);
+  }
+
+  /** Stone takes no bullet damage; the impact only shoves the statue back. */
+  private deflectOffStone(e: Enemy, b: Bullet, px: number, pz: number): void {
+    const push = e.def.stalk?.bulletPush ?? 0;
+    const vlen = Math.hypot(b.vx, b.vz) || 1;
+    this.moveEnemy(e, (b.vx / vlen) * push, (b.vz / vlen) * push);
+    this.fx.sparks(px, 0.6, pz, 0xd8d4c8, 6, 4);
+    audio.impact();
+    this.removeBullet(b);
   }
 
   private removeBullet(b: Bullet): void {
@@ -3185,7 +3364,10 @@ export class Game {
     const p = this.player;
     if (!p) return;
     const radar: RadarBlip[] = [
-      ...this.enemies.filter((e) => e.alive).map((e) => ({ x: e.x, z: e.z, kind: 'enemy' as const })),
+      ...this.enemies
+        // a cloaked enemy only shows on the radar when it shows in the world
+        .filter((e) => e.alive && e.visibility >= (e.def.cloak?.radarAbove ?? 0))
+        .map((e) => ({ x: e.x, z: e.z, kind: 'enemy' as const })),
       ...this.coins.filter((c) => !c.taken).map((c) => ({ x: c.x, z: c.z, kind: 'coin' as const })),
     ];
     if (this.boss?.alive) radar.push({ x: this.boss.x, z: this.boss.z, kind: 'boss' });
