@@ -15,7 +15,6 @@
   font-family: var(--sans);
   font-size: 12px;
   color: var(--ink);
-  backdrop-filter: blur(6px);
 }
 .sbx-head {
   display: flex;
