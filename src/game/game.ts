@@ -513,7 +513,11 @@ export class Game {
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.lowQuality ? 1 : 1.75));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // `false`: only the drawing buffer. Letting three.js write a pixel width/height
+    // into the canvas style pinned it to the size the window had at load, so a
+    // window that grew afterwards (a browser maximizing on open) showed the game
+    // squeezed into the top-left corner. CSS (#stage, 100%) sizes it on screen.
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = !this.lowQuality;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;

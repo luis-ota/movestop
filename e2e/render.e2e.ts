@@ -53,6 +53,28 @@ async function pauseStopsDrawing({ page, check }: E2EContext): Promise<void> {
   check('voltar ao jogo desenha de novo', resumed > 30, { quadros: resumed });
 }
 
+/** The canvas must always cover the window, also after it changes size. */
+async function canvasFollowsWindow({ page, check }: E2EContext): Promise<void> {
+  const sizes = [
+    { width: 900, height: 600 },
+    { width: 1500, height: 860 },
+    { width: 1280, height: 760 },
+  ];
+  for (const size of sizes) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => {
+      const rect = (document.getElementById('stage') as HTMLCanvasElement).getBoundingClientRect();
+      return { w: Math.round(rect.width), h: Math.round(rect.height), x: rect.left, y: rect.top };
+    });
+    check(
+      `canvas cobre a janela em ${size.width}x${size.height}`,
+      r.w === size.width && r.h === size.height && r.x === 0 && r.y === 0,
+      r,
+    );
+  }
+}
+
 async function briefingReloadDraws({ page, check }: E2EContext): Promise<void> {
   await page.evaluate(() => (window as any).__MOVESTOP__.startLevel(1));
   await page.waitForFunction(() => (window as any).__MOVESTOP__.game.state === 'briefing');
@@ -115,5 +137,12 @@ async function effectMaterialsRecycled({ page, check }: E2EContext): Promise<voi
 
 await runE2E({
   path: '',
-  scenarios: [menuRunsAt30, pauseStopsDrawing, briefingReloadDraws, bulletsShareMaterials, effectMaterialsRecycled],
+  scenarios: [
+    canvasFollowsWindow,
+    menuRunsAt30,
+    pauseStopsDrawing,
+    briefingReloadDraws,
+    bulletsShareMaterials,
+    effectMaterialsRecycled,
+  ],
 });
