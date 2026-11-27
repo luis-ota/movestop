@@ -13,6 +13,8 @@ export interface DifficultyDef {
   enemyBulletSpeedMult: number;
   enemyHpBonus: number;
   contactDamage: boolean;
+  /** enemies sidestep incoming bullets (only Impossible: elsewhere a lined-up shot should land) */
+  enemyDodge: boolean;
   playerHpBonus: number;
   invulnTime: number;
   parryWindow: number;
@@ -34,6 +36,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     enemyBulletSpeedMult: 0.9,
     enemyHpBonus: 0,
     contactDamage: false,
+    enemyDodge: false,
     playerHpBonus: 1,
     invulnTime: 2,
     parryWindow: 0.2,
@@ -53,6 +56,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     enemyBulletSpeedMult: 1.05,
     enemyHpBonus: 0,
     contactDamage: false,
+    enemyDodge: false,
     playerHpBonus: 0,
     invulnTime: 1.25,
     parryWindow: 0.16,
@@ -72,6 +76,7 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
     enemyBulletSpeedMult: 1.3,
     enemyHpBonus: 2,
     contactDamage: true,
+    enemyDodge: true,
     playerHpBonus: 0,
     invulnTime: 0.75,
     parryWindow: 0.13,

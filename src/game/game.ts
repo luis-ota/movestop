@@ -18,6 +18,7 @@ import {
 import { buildSandboxLevel } from './sandbox';
 import { frameSlot } from './pacing';
 import { NavGrid } from './navigation';
+import { dodgeDirection } from './dodge';
 import {
   byPhase,
   chooseRoninAttack,
@@ -206,6 +207,11 @@ interface Enemy {
   trailTimer: number;
   /** midboss state; null for every other enemy */
   ronin: RoninState | null;
+  /** bullet sidestep (Impossible only): time left, pause before the next, direction */
+  dodgeTime: number;
+  dodgeCd: number;
+  dodgeX: number;
+  dodgeZ: number;
   aimAngle: number;
   bashRecovery: number;
   burstLeft: number;
@@ -358,6 +364,9 @@ const SAVING_FPS = 30;
 const STILL_STATES: ReadonlySet<GameState> = new Set<GameState>(['paused', 'briefing', 'dead', 'won', 'idle']);
 /** Frames drawn after the scene goes still, so the camera finishes settling. */
 const SETTLE_FRAMES = 60;
+
+/** Shared empty list: no allocation per frame when dodging is off. */
+const NO_THREATS: readonly never[] = [];
 
 /** How fast enemies turn to face the player, in world time. */
 const ENEMY_TURN_RATE = 9;
@@ -2065,6 +2074,10 @@ export class Game {
       visibility: 1,
       trailTimer: 0,
       ronin: def.ronin ? this.createRoninState(def.ronin, def.color, x, z) : null,
+      dodgeTime: 0,
+      dodgeCd: 0,
+      dodgeX: 0,
+      dodgeZ: 0,
       windup: 0,
       windupMax: 0,
       windupClock: 'world',
@@ -2329,6 +2342,10 @@ export class Game {
     const windupMult = (this.loadout.skin.enemyWindupMult ?? 1) * this.difficulty.enemyWindupMult;
     // one flow field toward the player for every enemy (cheap: rebuilt only on change)
     this.nav?.update(this.colliders, p.x, p.z);
+    // bullets enemies may sidestep: the player's own and the ones the player parried
+    const threats = this.difficulty.enemyDodge
+      ? this.bullets.filter((b) => b.alive && b.owner !== 'enemy')
+      : NO_THREATS;
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -2355,6 +2372,8 @@ export class Game {
       e.avatar.group.rotation.y = e.angle;
       const see = this.hasLOS(e.x, e.z, p.x, p.z) && dist < e.def.sightRange;
       const lunge = e.def.lunge;
+
+      if (this.updateDodge(e, simDt, threats)) continue;
 
       // the midboss runs its own state machine (it never uses the shared windup)
       if (e.ronin) {
@@ -3044,6 +3063,33 @@ export class Game {
     this.hideRoninAttackMarks(r);
     this.fx.afterimage(e.x, e.z, e.angle, e.def.color);
     this.emitHud();
+  }
+
+  /**
+   * Impossible only: a short sidestep away from an incoming bullet, in world
+   * time (stopping freezes it with the bullet, so a planned shot still has a
+   * chance). Never while an attack is charging, bursting or lunging, and never
+   * twice in a row. Returns true while the enemy is mid-dodge (skip its AI).
+   */
+  private updateDodge(e: Enemy, simDt: number, threats: readonly Bullet[]): boolean {
+    const dodge = e.def.dodge;
+    if (!dodge) return false;
+    if (e.dodgeTime > 0) {
+      e.dodgeTime -= simDt;
+      const step = dodge.speed * simDt;
+      this.moveEnemy(e, e.dodgeX * step, e.dodgeZ * step);
+      return true;
+    }
+    e.dodgeCd = Math.max(0, e.dodgeCd - simDt);
+    if (threats.length === 0 || e.dodgeCd > 0 || e.windup > 0 || e.burstLeft > 0 || e.lungeTime > 0) return false;
+    const side = dodgeDirection(e.x, e.z, e.def.radius, threats, e.strafeDir);
+    if (!side) return false;
+    e.dodgeX = side.x;
+    e.dodgeZ = side.z;
+    e.dodgeTime = dodge.time;
+    e.dodgeCd = dodge.cooldown;
+    this.fx.dust(e.x, e.z, 0xbfae8c, 3);
+    return true;
   }
 
   private createMortarHazard(e: Enemy): void {

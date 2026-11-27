@@ -1,3 +1,4 @@
+import type { DodgeTuning } from './dodge';
 import type { RoninTuning } from './ronin';
 
 export type EnemyType =
@@ -59,6 +60,8 @@ export interface EnemyDef {
   cloak?: CloakTuning;
   /** midboss: its whole pattern lives in ronin.ts and game.ts `updateRonin` */
   ronin?: RoninTuning;
+  /** sidesteps incoming bullets on difficulties that allow it (dodge.ts) */
+  dodge?: DodgeTuning;
 }
 
 /**
@@ -174,6 +177,9 @@ export interface WardTuning {
   fuse: number;
 }
 
+/** Shared by every enemy that can dodge: a short hop, then a pause. */
+const DODGE: DodgeTuning = { speed: 7, time: 0.16, cooldown: 1.6 };
+
 const KITE: KiteTuning = {
   approachBeyond: 8.5,
   approachSpeed: 0.42,
@@ -204,6 +210,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     body: 0xc93227,
     scale: 1,
     kite: KITE,
+    dodge: DODGE,
   },
   burster: {
     type: 'burster',
@@ -224,6 +231,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     body: 0xe06a12,
     scale: 0.96,
     kite: KITE,
+    dodge: DODGE,
   },
   sniper: {
     type: 'sniper',
@@ -245,6 +253,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     scale: 1,
     reposition: { speed: 0.46, minDistance: 0.9 },
     laser: { lockAt: 0.7, length: 30 },
+    dodge: DODGE,
   },
   shield: {
     type: 'shield',
@@ -303,6 +312,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       cooldown: 1.7,
       contactRange: 0.62,
     },
+    dodge: DODGE,
   },
   mortar: {
     type: 'mortar',
@@ -324,6 +334,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     scale: 1.08,
     kite: KITE,
     mortar: { radius: 1.3, fuse: 0.95, minWindupMult: 0.8 },
+    dodge: DODGE,
   },
   warden: {
     type: 'warden',
@@ -345,6 +356,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
     scale: 0.98,
     kite: KITE,
     wards: { count: 3, spacing: 1.8, maxDistance: 8, radius: 1.05, fuse: 0.28 },
+    dodge: DODGE,
   },
   statue: {
     type: 'statue',
@@ -405,6 +417,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       recovery: 0.9,
     },
     cloak: { minOpacity: 0.07, radarAbove: 0.5, trailEvery: 0.28 },
+    dodge: DODGE,
   },
   ronin: {
     type: 'ronin',

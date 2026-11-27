@@ -311,6 +311,44 @@ async function navigationAroundCover(page: Page): Promise<void> {
   check('controle: sem navegação ela fica presa no U', without < 1.5, { aproximou: +without.toFixed(2) });
 }
 
+/** Counts how many dodges start while shooting at a gunner on a difficulty. */
+async function dodgesOn(page: Page, difficulty: 'hard' | 'impossible'): Promise<number> {
+  await page.evaluate((d) => {
+    const m = (window as any).__MOVESTOP__;
+    m.save.difficulty = d;
+    m.applyLoadout();
+    const g = m.game;
+    g.__dodges = 0;
+    const original = Object.getPrototypeOf(g).updateDodge;
+    g.updateDodge = function (e: any, dt: number, threats: any) {
+      const before = e.dodgeTime > 0;
+      const r = original.call(this, e, dt, threats);
+      if (!before && e.dodgeTime > 0) g.__dodges++;
+      return r;
+    };
+  }, difficulty);
+  await resetArena(page, true);
+  await spawnNear(page, 'gunner', 0, -6);
+  await shootAt(page, 'gunner', 6);
+  return page.evaluate(() => {
+    const g = (window as any).__MOVESTOP__.game;
+    delete g.updateDodge; // back to the prototype method
+    return g.__dodges;
+  });
+}
+
+async function dodgeOnlyOnImpossible(page: Page): Promise<void> {
+  const hard = await dodgesOn(page, 'hard');
+  const impossible = await dodgesOn(page, 'impossible');
+  await page.evaluate(() => {
+    const m = (window as any).__MOVESTOP__;
+    m.save.difficulty = 'hard';
+    m.applyLoadout();
+  });
+  check('no Difícil os inimigos não desviam de tiro', hard === 0, { desvios: hard });
+  check('no Impossível os inimigos desviam de tiro', impossible > 0, { desvios: impossible });
+}
+
 // ---------------------------------------------------------------- ronin and boss
 
 async function ronin(page: Page) {
@@ -521,6 +559,7 @@ await runE2E({
     ninjaStrike,
     ninjaParry,
     navigationAroundCover,
+    dodgeOnlyOnImpossible,
     roninParriesBullets,
     roninShurikenFan,
     roninOnlyHurtWhenOpen,
