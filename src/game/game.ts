@@ -822,8 +822,9 @@ export class Game {
       1 + (skin.extraHp ?? 0) + (upgrades.has('up-kabuto') ? 1 : 0),
       this.loadout.difficulty,
     );
+    // the powder upgrade adds to a loaded level; an unarmed level stays unarmed
     const ammo = startingAmmoFor(
-      level.ammo + (upgrades.has('up-polvora') ? 2 : 0),
+      level.ammo > 0 ? level.ammo + (upgrades.has('up-polvora') ? 2 : 0) : 0,
       this.loadout.difficulty,
     );
     const parryRadius = 1.9 * (skin.parryMult ?? 1) * (upgrades.has('up-ukaeshi') ? 1.2 : 1);
