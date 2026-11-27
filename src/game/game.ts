@@ -2707,7 +2707,7 @@ export class Game {
       last: null,
       timer: 0,
       timerMax: 0,
-      cooldown: byPhase(tuning.attackCooldown, 1),
+      cooldown: byPhase(tuning.attackCooldown[this.difficulty.id], 1),
       aim: 0,
       dashX: 0,
       dashZ: 0,
@@ -2858,7 +2858,7 @@ export class Game {
         e.avatar.setCharge(0);
         if (r.timer <= 0) {
           r.mode = 'stalk';
-          r.cooldown = byPhase(t.attackCooldown, r.phase);
+          r.cooldown = this.roninCooldown(r);
         }
         break;
       }
@@ -2885,12 +2885,17 @@ export class Game {
         r.timer = byPhase(t.arrows.gap, r.phase);
         if (r.volleyLeft <= 0) {
           r.mode = 'stalk';
-          r.cooldown = byPhase(t.attackCooldown, r.phase);
+          r.cooldown = this.roninCooldown(r);
           this.hideRoninAttackMarks(r);
         }
         break;
       }
     }
+  }
+
+  /** Pause before his next attack: longer on Easy/Difficult, back to back only on Impossible. */
+  private roninCooldown(r: RoninState): number {
+    return byPhase(r.tuning.attackCooldown[this.difficulty.id], r.phase);
   }
 
   private startRoninAttack(e: Enemy, r: RoninState, attack: RoninAttack, aim: number): void {
@@ -2975,14 +2980,14 @@ export class Game {
       audio.slash(true);
       if (off < t.quickcut.width / 2 + Game.PLAYER_RADIUS && !this.parriedRoninCut(e)) this.hitPlayer();
       r.mode = 'stalk';
-      r.cooldown = t.quickcut.recovery;
+      r.cooldown = Math.max(t.quickcut.recovery, this.roninCooldown(r));
       return;
     }
 
     // shurikens: one fan, every star parryable
     this.fireRoninProjectile(e, 'shuriken');
     r.mode = 'stalk';
-    r.cooldown = byPhase(t.attackCooldown, r.phase);
+    r.cooldown = this.roninCooldown(r);
   }
 
   private fireRoninProjectile(e: Enemy, kind: 'shuriken' | 'arrow'): void {

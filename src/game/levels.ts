@@ -443,7 +443,7 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       hpPerPhase: 3,
       approachSpeed: [2.1, 2.8],
       stillCreep: 0.8,
-      attackCooldown: [1.1, 0.5],
+      attackCooldown: { easy: [2.2, 1.5], hard: [1.8, 1.1], impossible: [1.1, 0.5] },
       meleeRange: 2.4,
       shurikenRange: 9,
       fleeSpeed: 1.8,

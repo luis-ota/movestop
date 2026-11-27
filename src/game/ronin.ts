@@ -13,6 +13,8 @@
  *   even while time is stopped.
  */
 
+import type { Difficulty } from './difficulty';
+
 export type RoninPhase = 1 | 2;
 export type RoninAttack = 'heavy' | 'quickcut' | 'shuriken';
 
@@ -25,8 +27,11 @@ export interface RoninTuning {
   approachSpeed: PerPhase;
   /** phase 2 only: metres per real second while the world is stopped */
   stillCreep: number;
-  /** pause between attacks (world time) */
-  attackCooldown: PerPhase;
+  /**
+   * Pause between attacks (world time), per difficulty: only Impossible keeps
+   * him attacking back to back.
+   */
+  attackCooldown: Record<Difficulty, PerPhase>;
   /** at or inside this distance he uses the sword */
   meleeRange: number;
   /** shurikens only up to this distance */
@@ -46,6 +51,7 @@ export interface RoninTuning {
     windup: number;
     length: number;
     width: number;
+    /** shortest pause after it; the difficulty's attackCooldown wins when longer */
     recovery: number;
   };
   shuriken: {

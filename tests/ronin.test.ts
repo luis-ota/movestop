@@ -48,12 +48,26 @@ describe('ronin: vida em duas fases', () => {
   });
 });
 
+describe('ronin: ritmo por dificuldade', () => {
+  it('só no Impossível ataca colado; Fácil é o mais lento', () => {
+    for (const phase of [1, 2] as const) {
+      const easy = byPhase(t.attackCooldown.easy, phase);
+      const hard = byPhase(t.attackCooldown.hard, phase);
+      const impossible = byPhase(t.attackCooldown.impossible, phase);
+      expect(impossible).toBeLessThan(hard);
+      expect(hard).toBeLessThan(easy);
+    }
+  });
+});
+
 describe('ronin: segunda fase mais rápida', () => {
   it('carrega e descansa menos na fase 2', () => {
     expect(byPhase(t.heavy.windup, 2)).toBeLessThan(byPhase(t.heavy.windup, 1));
     expect(byPhase(t.heavy.recovery, 2)).toBeLessThan(byPhase(t.heavy.recovery, 1));
     expect(byPhase(t.shuriken.windup, 2)).toBeLessThan(byPhase(t.shuriken.windup, 1));
-    expect(byPhase(t.attackCooldown, 2)).toBeLessThan(byPhase(t.attackCooldown, 1));
+    for (const d of ['easy', 'hard', 'impossible'] as const) {
+      expect(byPhase(t.attackCooldown[d], 2)).toBeLessThan(byPhase(t.attackCooldown[d], 1));
+    }
     expect(byPhase(t.arrows.count, 2)).toBeGreaterThan(byPhase(t.arrows.count, 1));
   });
 
