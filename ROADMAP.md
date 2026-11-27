@@ -18,6 +18,14 @@ Track progress on the public [MOVESTOP Roadmap board](https://github.com/users/l
 ## Campaign and game feel
 
 - [ ] Additional acts, encounters and a second boss with new mechanics.
+- [ ] Rework O Relojoeiro so the final boss tops the Ronin midboss. Today he stands still and repeats one bullet pattern; the plan is a boss that bends the time rule itself:
+  - phase 1: learn — parry his bullets (as today);
+  - phase 2: inverted time — the world runs while the player stands still (the Estátua's rule, arena-wide);
+  - phase 3: his clock — he decides when time runs, telegraphed by his clock hands;
+  - he moves between the 12/3/6/9 marks of a clock drawn on the floor, and his hands become telegraphed sweeping beams;
+  - his openings reuse the Ronin's language (eyes go dark, an opening mark), so players apply what they learned.
+- [ ] Parry follow-ups: deflect projectiles back with intent (aimed returns), parry-only enemy shots and a guard-break on heavy hits.
+- [ ] Custom levels (later, not scheduled): a grid editor and level files the campaign loader can read, sharing the level format (`LevelDef`), with validation for spawns inside walls and unreachable cells (the navigation grid already answers both).
 - [ ] Controller support for desktop and mobile keyboards.
 - [ ] Accessibility pass: remappable keys, colorblind-safe cues, reduced motion and readable HUD scaling.
 - [ ] Localization infrastructure and a first complete translation.
