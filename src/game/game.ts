@@ -16,6 +16,7 @@ import {
   type StrikeTuning,
 } from './levels';
 import { buildSandboxLevel } from './sandbox';
+import { frameSlot } from './pacing';
 import {
   byPhase,
   chooseRoninAttack,
@@ -349,8 +350,9 @@ export interface SandboxOptions {
   infiniteAmmo: boolean;
 }
 
-/** Menu frame interval: about 30 fps. */
-const MENU_FRAME_MS = 31;
+/** Frame rate caps. The menu only drifts its camera; power saving halves play. */
+const PLAY_FPS = 60;
+const SAVING_FPS = 30;
 /** Campaign states whose scene is frozen behind a screen. */
 const STILL_STATES: ReadonlySet<GameState> = new Set<GameState>(['paused', 'briefing', 'dead', 'won', 'idle']);
 /** Frames drawn after the scene goes still, so the camera finishes settling. */
@@ -3742,8 +3744,7 @@ export class Game {
   private loop = (): void => {
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
-    // the menu only drifts the camera: ~30 fps is enough and halves its cost
-    if (this.mode === 'menu' && now - this.lastFrame < MENU_FRAME_MS) return;
+    if (!this.frameDue(now)) return;
     const dt = Math.min((now - this.lastFrame) / 1000, 0.05);
     this.lastFrame = now;
     this.realTime += dt;
@@ -3798,6 +3799,28 @@ export class Game {
       this.composer.render();
     }
   };
+
+  /** Power saving: play at SAVING_FPS instead of PLAY_FPS. */
+  private economy = false;
+  /** When the next frame may run, for the frame-rate cap. */
+  private nextFrameAt = 0;
+
+  setEconomy(on: boolean): void {
+    this.economy = on === true;
+    this.nextFrameAt = 0;
+  }
+
+  /**
+   * Frame-rate cap (rules in pacing.ts). Most of a frame's cost is fixed
+   * (compositing and presenting the canvas), so a 120/144 Hz display drawing
+   * every refresh cost 2-2.4x a 60 Hz one for no gameplay gain.
+   */
+  private frameDue(now: number): boolean {
+    const fps = this.mode === 'menu' || this.economy ? SAVING_FPS : PLAY_FPS;
+    const slot = frameSlot(now, this.nextFrameAt, fps);
+    this.nextFrameAt = slot.next;
+    return slot.due;
+  }
 
   /** Frames still to draw after the scene went still (camera settling, last effects). */
   private settleFrames = SETTLE_FRAMES;

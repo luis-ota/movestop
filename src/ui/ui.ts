@@ -67,6 +67,7 @@ export interface UIActions {
   equipItem: (id: string) => boolean;
   confirmPack: (id: string) => Promise<{ ok: boolean; pending?: boolean; error?: string }>;
   toggleMute: () => void;
+  toggleEconomy: () => void;
   closeShop: () => void;
   touchMove: (x: number, z: number) => void;
   touchAim: (x: number, z: number, fire: boolean) => void;
@@ -453,6 +454,9 @@ export class UI {
         break;
       case 'mute':
         this.actions.toggleMute();
+        break;
+      case 'economy':
+        this.actions.toggleEconomy();
         break;
       case 'desktop-ok':
         (this.root.querySelector('#desktop-note') as HTMLElement).classList.remove('active');
@@ -1236,6 +1240,7 @@ export class UI {
         <button class="btn lg wide" data-action="resume">Continuar</button>
         <div class="row"><button class="btn ghost" data-action="restart">Recomeçar</button><button class="btn ghost" data-action="quit">Sair</button></div>
         <button class="btn ghost sm wide" data-action="mute">${save.muted ? 'Som desligado' : 'Som ligado'}</button>
+        <button class="btn ghost sm wide" data-action="economy" aria-pressed="${save.economy}" title="Desenha a 30 quadros por segundo: menos uso de CPU e bateria">${save.economy ? 'Economia de energia ligada · 30 fps' : 'Economia de energia desligada · 60 fps'}</button>
       </div>
     </div>`;
     this.activate('pause');

@@ -200,6 +200,13 @@ const actions: UIActions = {
   equipItem: (id) => equipItem(id),
   confirmPack: (id) => confirmPack(id),
   toggleMute: () => toggleMute(),
+  toggleEconomy: () => {
+    save.economy = !save.economy;
+    persist(save);
+    game.setEconomy(save.economy);
+    // refresh the button label on the pause screen it was pressed from
+    if (ui.getActiveScreen() === 'pause') ui.showPause();
+  },
   closeShop: () => closeShop(),
   touchMove: (x, z) => {
     if (duelActive && duelInput) duelInput.setMove(x, z);
@@ -250,6 +257,7 @@ onlineUI.hide();
 ui.setLevel(currentLevelId);
 ui.setMuted(save.muted);
 audio.setMuted(save.muted);
+game.setEconomy(save.economy);
 ui.showMenu();
 
 document.getElementById('boot')?.classList.add('gone');

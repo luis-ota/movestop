@@ -75,6 +75,33 @@ async function canvasFollowsWindow({ page, check }: E2EContext): Promise<void> {
   }
 }
 
+/** Power saving from the pause screen: the game draws at ~30 fps, then back to 60. */
+async function economyFromPause({ page, check }: E2EContext): Promise<void> {
+  await page.evaluate(() => {
+    const m = (window as any).__MOVESTOP__;
+    m.startLevel(0);
+    m.game.beginPlay();
+    m.ui.showHUD();
+  });
+  const pressEconomy = async () => {
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => (window as any).__MOVESTOP__.game.state === 'paused');
+    await page.click('[data-action="economy"]');
+    const label = await page.textContent('[data-action="economy"]');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => (window as any).__MOVESTOP__.game.state === 'playing');
+    return label ?? '';
+  };
+  const onLabel = await pressEconomy();
+  const saving = await framesDrawn(page, 2000);
+  check('economia de energia desenha a ~30 fps', saving >= 50 && saving <= 70, { quadrosEm2s: saving, botao: onLabel });
+  const offLabel = await pressEconomy();
+  const normal = await framesDrawn(page, 2000);
+  check('desligar a economia volta a ~60 fps', normal >= 100, { quadrosEm2s: normal, botao: offLabel });
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('movestop.save.v1') ?? '{}').economy);
+  check('a escolha fica salva', stored === false, { salvo: stored });
+}
+
 async function briefingReloadDraws({ page, check }: E2EContext): Promise<void> {
   await page.evaluate(() => (window as any).__MOVESTOP__.startLevel(1));
   await page.waitForFunction(() => (window as any).__MOVESTOP__.game.state === 'briefing');
@@ -141,6 +168,7 @@ await runE2E({
     canvasFollowsWindow,
     menuRunsAt30,
     pauseStopsDrawing,
+    economyFromPause,
     briefingReloadDraws,
     bulletsShareMaterials,
     effectMaterialsRecycled,

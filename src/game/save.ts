@@ -15,6 +15,8 @@ export interface SaveData {
   best: Record<string, number>;
   purchases: string[];
   muted: boolean;
+  /** power saving: the game draws at 30 fps instead of 60 */
+  economy: boolean;
   plays: number;
   kills: number;
 }
@@ -35,6 +37,7 @@ export function defaultSave(): SaveData {
     best: {},
     purchases: [],
     muted: false,
+    economy: false,
     plays: 0,
     kills: 0,
   };
@@ -57,6 +60,8 @@ export function loadSave(): SaveData {
     save.coins = Math.max(0, Math.floor(save.coins || 0));
     save.unlocked = Math.min(8, Math.max(1, Math.floor(save.unlocked || 1)));
     save.difficulty = isDifficulty(save.difficulty) ? save.difficulty : base.difficulty;
+    // a hand-edited save can hold anything: only a literal `true` turns it on
+    save.economy = parsed.economy === true;
     return save;
   } catch {
     return defaultSave();
