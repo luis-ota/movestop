@@ -1,7 +1,44 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { SkinDef } from './catalog';
 
 const box = new THREE.BoxGeometry(1, 1, 1);
+
+/**
+ * Bakes the voxel cubes of `group` that never move on their own into one mesh
+ * per material. Every separate mesh costs a draw call (CPU in the page and in
+ * the browser's GPU process), and an avatar was 14-22 of them.
+ *
+ * Only direct children built by `voxel()` are baked; `keep` lists the ones an
+ * animation moves, scales or toggles. Materials are kept as they are, so hit
+ * flashes, fades and charge glows that change a material still reach every cube.
+ */
+function mergeStaticParts(group: THREE.Object3D, keep: readonly THREE.Object3D[] = []): void {
+  const buckets = new Map<THREE.Material, THREE.Mesh[]>();
+  for (const child of group.children) {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || mesh.geometry !== box || !mesh.visible || keep.includes(mesh)) continue;
+    const mat = mesh.material as THREE.Material;
+    const list = buckets.get(mat) ?? [];
+    list.push(mesh);
+    buckets.set(mat, list);
+  }
+  for (const [mat, meshes] of buckets) {
+    if (meshes.length < 2) continue;
+    const parts = meshes.map((m) => {
+      m.updateMatrix();
+      return box.clone().applyMatrix4(m.matrix);
+    });
+    const geometry = mergeGeometries(parts, false);
+    for (const p of parts) p.dispose();
+    if (!geometry) continue;
+    const baked = new THREE.Mesh(geometry, mat);
+    baked.castShadow = meshes.some((m) => m.castShadow);
+    baked.receiveShadow = meshes.some((m) => m.receiveShadow);
+    for (const m of meshes) group.remove(m);
+    group.add(baked);
+  }
+}
 
 let contactTex: THREE.CanvasTexture | null = null;
 
@@ -181,6 +218,9 @@ export class PlayerAvatar {
       tip,
       this.katana,
     );
+    // legs, arms, torso and head animate; the katana swings and toggles its blade
+    mergeStaticParts(this.group, [this.legL, this.legR, this.armL, this.armR, this.torso, this.head]);
+    mergeStaticParts(this.hat);
   }
 
   setSkin(skin: SkinDef): void {
@@ -398,6 +438,9 @@ export class EnemyAvatar {
       this.group.add(brim, crown, coatL, coatR, sash, scabbard, blade, bow, quiver);
     }
 
+    // the body only bobs as a whole; the eyes scale with the charge
+    mergeStaticParts(this.group, [this.eyeL, this.eyeR]);
+
     this.group.add(contactShadow(0.86));
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(0.5, 0.56, 24),
@@ -421,7 +464,8 @@ export class EnemyAvatar {
       this.group.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (!mesh.isMesh || mesh === this.ring) return;
-        this.fadeMeshes.push(mesh);
+        // only the parts that cast a shadow get it toggled (not the contact-shadow plane)
+        if (mesh.castShadow) this.fadeMeshes.push(mesh);
         const mat = mesh.material as THREE.Material;
         if (seen.has(mat)) return;
         seen.add(mat);
@@ -438,9 +482,7 @@ export class EnemyAvatar {
     for (const { mat, base } of this.fadeMats) mat.opacity = base * v;
     // a fully shaded silhouette would give the hidden body away on desktop only
     const shadow = v > 0.5;
-    for (const mesh of this.fadeMeshes) {
-      if (mesh.castShadow !== shadow && mesh.geometry === box) mesh.castShadow = shadow;
-    }
+    for (const mesh of this.fadeMeshes) mesh.castShadow = shadow;
   }
 
   setCharge(v: number): void {
@@ -552,6 +594,8 @@ export class BossAvatar {
       hatTop,
       this.hands,
     );
+    // the eye glows with the charge; hands and orbiters are animated groups
+    mergeStaticParts(this.group, [eye]);
   }
 
   setCharge(v: number): void {
