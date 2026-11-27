@@ -67,6 +67,8 @@ describe('difficulty', () => {
     expect(startingAmmoFor(6, 'hard')).toBe(6);
     expect(startingAmmoFor(6, 'impossible')).toBe(4);
     expect(startingAmmoFor(2, 'impossible')).toBe(3);
+    // unarmed levels stay unarmed on every difficulty (the 3-bullet floor used to arm them)
+    for (const d of ['easy', 'hard', 'impossible'] as const) expect(startingAmmoFor(0, d)).toBe(0);
   });
 
   it('aumenta agressividade e resistência do chefe progressivamente', () => {

@@ -108,6 +108,8 @@ export function playerMaxHpFor(base: number, difficulty: Difficulty): number {
 }
 
 export function startingAmmoFor(base: number, difficulty: Difficulty): number {
+  // levels without ammo are unarmed by design (Desarmado, the Ronin duel): keep them at 0
+  if (base <= 0) return 0;
   return Math.max(3, base + getDifficulty(difficulty).ammoBonus);
 }
 
