@@ -3,12 +3,12 @@
  *
  * Starts its own Vite dev server on a free port and opens the game in a
  * headless browser, then runs each scenario and exits non-zero if any check
- * failed. Needs a Playwright browser, either the bundled one:
+ * failed.
  *
- *   bunx playwright install chromium
- *
- * or a browser already on the machine: PW_CHANNEL=chrome | msedge
- * Set E2E_HEADED=1 to watch it run.
+ * Browser: Google Chrome by default. PW_CHANNEL picks another installed one
+ * (msedge, chrome-beta…); PW_CHANNEL=bundled uses Playwright's own Chromium
+ * (bunx playwright install chromium). Without Chrome installed it falls back
+ * to the bundled Chromium. Set E2E_HEADED=1 to watch it run.
  */
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from 'playwright';
@@ -26,6 +26,34 @@ export interface E2EContext {
 }
 
 export type Scenario = (ctx: E2EContext) => Promise<void>;
+
+/**
+ * Chrome first (what most players use), unless PW_CHANNEL says otherwise;
+ * Playwright's bundled Chromium when Chrome is not installed.
+ */
+async function launchBrowser(): Promise<Browser> {
+  const headless = process.env.E2E_HEADED !== '1';
+  const wanted = process.env.PW_CHANNEL?.trim() || 'chrome';
+  const channel = wanted === 'bundled' ? undefined : wanted;
+  try {
+    return await chromium.launch({ channel, headless });
+  } catch (error) {
+    if (channel === 'chrome' && !process.env.PW_CHANNEL) {
+      console.warn('Google Chrome não encontrado; usando o Chromium do Playwright.');
+      try {
+        return await chromium.launch({ headless });
+      } catch {
+        /* fall through to the message below */
+      }
+    }
+    console.error(
+      'Não foi possível abrir um navegador.\n' +
+        '  Instale o Google Chrome, ou o Chromium do Playwright:  bunx playwright install chromium\n' +
+        '  ou escolha outro navegador instalado:  PW_CHANNEL=msedge\n',
+    );
+    throw error;
+  }
+}
 
 export async function runE2E(options: { path: string; scenarios: Scenario[] }): Promise<never> {
   const checks: Check[] = [];
@@ -45,19 +73,8 @@ export async function runE2E(options: { path: string; scenarios: Scenario[] }): 
     const base = server.resolvedUrls?.local[0];
     if (!base) throw new Error('o servidor Vite não informou uma URL local');
 
-    try {
-      browser = await chromium.launch({
-        channel: process.env.PW_CHANNEL || undefined,
-        headless: process.env.E2E_HEADED !== '1',
-      });
-    } catch (error) {
-      console.error(
-        'Não foi possível abrir um navegador do Playwright.\n' +
-          '  Instale o Chromium dele:  bunx playwright install chromium\n' +
-          '  ou use um navegador já instalado:  PW_CHANNEL=chrome (ou msedge)\n',
-      );
-      throw error;
-    }
+    browser = await launchBrowser();
+    console.log(`navegador: ${browser.browserType().name()} ${browser.version()}`);
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
     const pageErrors: string[] = [];

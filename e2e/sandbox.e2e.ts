@@ -103,6 +103,19 @@ async function pointAt(page: Page, type: string): Promise<boolean> {
 }
 
 /**
+ * Keeps a target still for a shooting check: a long spawn grace skips its AI
+ * (no strafing out of the line of fire, no shooting back). The hit rules being
+ * checked do not depend on the AI.
+ */
+async function holdStill(page: Page, type: string): Promise<void> {
+  await page.evaluate((t) => {
+    const g = (window as any).__MOVESTOP__.game;
+    const e = g.enemies.filter((n: any) => n.alive && n.type === t).pop();
+    e.grace = 999;
+  }, type);
+}
+
+/**
  * Fires a few shots at `type`, moving between them so the bullets fly. Bullets
  * freeze with the world, so it keeps walking until every player bullet has
  * landed; stopping early used to leave shots hanging in the air (a flaky miss).
@@ -155,6 +168,7 @@ async function bulletsVsStone(page: Page): Promise<void> {
   // control: the same aiming must kill a gunner, otherwise the statue result means nothing
   await resetArena(page, true);
   await spawnNear(page, 'gunner', 0, -5);
+  await holdStill(page, 'gunner');
   const before = await counters(page);
   await shootAt(page, 'gunner', 4);
   const after = await counters(page);
@@ -163,6 +177,7 @@ async function bulletsVsStone(page: Page): Promise<void> {
 
   await resetArena(page, true);
   await spawnNear(page, 'statue', 0, -5);
+  await holdStill(page, 'statue');
   const s0 = await enemy(page, 'statue');
   await shootAt(page, 'statue', 4);
   const s1 = await enemy(page, 'statue');
