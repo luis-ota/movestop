@@ -17,6 +17,7 @@ import {
 } from './levels';
 import { buildSandboxLevel } from './sandbox';
 import { frameSlot } from './pacing';
+import { NavGrid } from './navigation';
 import {
   byPhase,
   chooseRoninAttack,
@@ -419,6 +420,8 @@ export class Game {
   private state: GameState = 'idle';
   private mode: 'menu' | 'game' | 'duel' = 'menu';
   private pausedFrom: GameState = 'playing';
+  /** route finding on the arena grid; null outside the campaign arena */
+  private nav: NavGrid | null = null;
   /** non-null while the dev sandbox arena is loaded */
   private sandbox: SandboxOptions | null = null;
 
@@ -1739,6 +1742,7 @@ export class Game {
     const cols = level.grid[0].length;
     this.halfW = (cols - 1) / 2;
     this.halfH = (rows - 1) / 2;
+    this.nav = new NavGrid(cols, rows);
     this.floorCellList = [];
 
     const crateCells: { row: number; col: number }[] = [];
@@ -2264,8 +2268,28 @@ export class Game {
     e.z = clamp(e.z, -maxZ, maxZ);
   }
 
-  /** Walk toward a point, sliding along cover instead of grinding into it. */
-  private seekEnemy(e: Enemy, dirX: number, dirZ: number, pace: number, simDt: number): void {
+  /**
+   * Walk toward a goal near the player (the player by default). The arena's
+   * flow field picks the route around cover, on every difficulty; without a
+   * route (unreachable goal) it falls back to the straight line, sliding along
+   * cover instead of grinding into it.
+   */
+  private seekEnemy(
+    e: Enemy,
+    dirX: number,
+    dirZ: number,
+    pace: number,
+    simDt: number,
+    goalX = this.player?.x,
+    goalZ = this.player?.z,
+  ): void {
+    if (this.nav && goalX !== undefined && goalZ !== undefined) {
+      const route = this.nav.direction(this.colliders, e.x, e.z, e.def.radius, goalX, goalZ);
+      if (route) {
+        dirX = route.x;
+        dirZ = route.z;
+      }
+    }
     const bx = e.x;
     const bz = e.z;
     this.moveEnemy(e, dirX * pace * simDt, dirZ * pace * simDt);
@@ -2303,6 +2327,8 @@ export class Game {
     const p = this.player!;
     const level = this.level!;
     const windupMult = (this.loadout.skin.enemyWindupMult ?? 1) * this.difficulty.enemyWindupMult;
+    // one flow field toward the player for every enemy (cheap: rebuilt only on change)
+    this.nav?.update(this.colliders, p.x, p.z);
 
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -2602,7 +2628,7 @@ export class Game {
     const gx = tx - e.x;
     const gz = tz - e.z;
     const gd = Math.hypot(gx, gz);
-    if (gd > 0.15) this.seekEnemy(e, gx / gd, gz / gd, strike.speed * this.difficulty.enemySpeedMult, simDt);
+    if (gd > 0.15) this.seekEnemy(e, gx / gd, gz / gd, strike.speed * this.difficulty.enemySpeedMult, simDt, tx, tz);
     e.avatar.setCharge(0);
   }
 
@@ -4017,6 +4043,7 @@ export class Game {
     this.clearHazards();
     this.enemies = [];
     this.colliders = [];
+    this.nav = null;
     this.boss = null;
     this.player = null;
     this.level = null;

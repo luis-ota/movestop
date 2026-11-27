@@ -271,6 +271,46 @@ async function ninjaParry(page: Page): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------- navigation
+
+/**
+ * Traps a statue in an invisible U of solids, open on the side away from the
+ * player, and lets it walk (it moves while the player stands still). With the
+ * flow field it walks out of the cup and around; straight-line seeking grinds
+ * into the bottom of the U forever. `withNav: false` proves the check can fail.
+ */
+async function escapesCup(page: Page, withNav: boolean): Promise<number> {
+  await resetArena(page, true);
+  await spawnNear(page, 'statue', 0, -6);
+  return page.evaluate(async (nav) => {
+    const g = (window as any).__MOVESTOP__.game;
+    const p = g.player;
+    const e = g.enemies.find((n: any) => n.alive && n.type === 'statue');
+    e.x = Math.round(e.x);
+    e.z = Math.round(e.z);
+    const wall = (x: number, z: number) => ({ minX: x - 0.5, maxX: x + 0.5, minZ: z - 0.5, maxZ: z + 0.5, active: true, kind: 'wall' });
+    const cup = [];
+    for (let dx = -2; dx <= 2; dx++) cup.push(wall(e.x + dx, e.z + 1.5)); // bottom, toward the player
+    for (let dz = -1; dz <= 1; dz++) cup.push(wall(e.x - 2, e.z + dz + 0.5), wall(e.x + 2, e.z + dz + 0.5));
+    g.colliders.push(...cup);
+    const saved = g.nav;
+    if (!nav) g.nav = null;
+    const start = Math.hypot(e.x - p.x, e.z - p.z);
+    await new Promise((r) => setTimeout(r, 9000));
+    const end = Math.hypot(e.x - p.x, e.z - p.z);
+    g.nav = saved;
+    for (const c of cup) c.active = false;
+    return start - end;
+  }, withNav);
+}
+
+async function navigationAroundCover(page: Page): Promise<void> {
+  const withNav = await escapesCup(page, true);
+  check('com navegação a Estátua sai da cobertura em U e chega perto', withNav > 3, { aproximou: +withNav.toFixed(2) });
+  const without = await escapesCup(page, false);
+  check('controle: sem navegação ela fica presa no U', without < 1.5, { aproximou: +without.toFixed(2) });
+}
+
 // ---------------------------------------------------------------- ronin and boss
 
 async function ronin(page: Page) {
@@ -480,6 +520,7 @@ await runE2E({
     ninjaCloak,
     ninjaStrike,
     ninjaParry,
+    navigationAroundCover,
     roninParriesBullets,
     roninShurikenFan,
     roninOnlyHurtWhenOpen,
