@@ -435,7 +435,8 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       shurikenRange: 9,
       fleeSpeed: 1.8,
       throwOffset: 1.3,
-      heavy: { windup: [1.0, 0.6], range: 2.9, halfArc: 1.05, recovery: [1.3, 0.85] },
+      // recovery = the vulnerable "stun" after the heavy cut (world time)
+      heavy: { windup: [1.0, 0.6], range: 2.9, halfArc: 1.05, recovery: [2.0, 1.4] },
       quickcut: { windup: 0.32, length: 3.4, width: 0.8, recovery: 0.35 },
       shuriken: { windup: [0.42, 0.26], count: [3, 5], spread: 0.32, speed: [10, 12.5] },
       arrows: { count: [3, 4], gap: [0.22, 0.14], speed: 15, lead: 0.06 },
