@@ -477,6 +477,103 @@ async function roninShurikenFan(page: Page): Promise<void> {
   check('shurikens espaçadas pelo spread', fan.gaps.every((gap: number) => Math.abs(gap - fan.spread) < 0.01), fan);
 }
 
+/** Walks left and right for `ms` so world time runs without drifting far. */
+async function pace(page: Page, ms: number): Promise<void> {
+  const end = Date.now() + ms;
+  let left = true;
+  while (Date.now() < end) {
+    const key = left ? 'KeyA' : 'KeyD';
+    await page.keyboard.down(key);
+    await page.waitForTimeout(250);
+    await page.keyboard.up(key);
+    left = !left;
+  }
+}
+
+async function setDifficulty(page: Page, d: 'hard' | 'impossible'): Promise<void> {
+  await page.evaluate((diff) => {
+    const m = (window as any).__MOVESTOP__;
+    m.save.difficulty = diff;
+    m.applyLoadout();
+  }, d);
+}
+
+/** Logs every Ronin attack start (and fan size) for a few seconds of play. */
+async function roninAttackLog(page: Page, difficulty: 'hard' | 'impossible') {
+  await setDifficulty(page, difficulty);
+  await resetArena(page, true);
+  await spawnNear(page, 'ronin', 0, -6);
+  await page.evaluate(() => {
+    const g = (window as any).__MOVESTOP__.game;
+    const e = g.enemies.find((n: any) => n.alive && n.type === 'ronin');
+    e.ronin.cooldown = 0;
+    e.ronin.comboCd = 0;
+    g.__log = [];
+    const proto = Object.getPrototypeOf(g);
+    g.startRoninAttack = function (en: any, r: any, attack: string, aim: number) {
+      g.__log.push(attack);
+      return proto.startRoninAttack.call(this, en, r, attack, aim);
+    };
+    g.fireRoninProjectile = function (en: any, kind: string, count?: number, spread?: number, speed?: number) {
+      if (count !== undefined) g.__log.push(`fan:${count}`);
+      return proto.fireRoninProjectile.call(this, en, kind, count, spread, speed);
+    };
+  });
+  await pace(page, 3500);
+  const log: string[] = await page.evaluate(() => {
+    const g = (window as any).__MOVESTOP__.game;
+    delete g.startRoninAttack;
+    delete g.fireRoninProjectile;
+    return g.__log;
+  });
+  await setDifficulty(page, 'hard');
+  return log;
+}
+
+async function roninComboOnImpossible(page: Page): Promise<void> {
+  const impossible = await roninAttackLog(page, 'impossible');
+  check(
+    'no Impossível o Ronin abre com o combo: avanço → 2 shurikens → golpe pesado',
+    impossible.slice(0, 4).join(' ') === 'rush flank fan:2 heavy',
+    { ataques: impossible },
+  );
+  const hard = await roninAttackLog(page, 'hard');
+  check('no Difícil não existe combo', !hard.includes('rush') && !hard.includes('flank'), { ataques: hard });
+}
+
+/** Phase 2: the dash after a hit also marks three sky arrows; phase 1 marks none. */
+async function roninSkyArrows(page: Page): Promise<void> {
+  const arrowsAfterDash = async (phase: 1 | 2) => {
+    await resetArena(page, true);
+    await spawnNear(page, 'ronin', 0, -6);
+    await setRonin(page, { phase, mode: 'dash', timer: 0.001, cooldown: 99 });
+    await page.keyboard.down('KeyA');
+    await page
+      .waitForFunction(() => (window as any).__MOVESTOP__.game.enemies.find((n: any) => n.alive && n.type === 'ronin')?.ronin.mode !== 'dash', null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+    await page.keyboard.up('KeyA');
+    return page.evaluate(() => {
+      const g = (window as any).__MOVESTOP__.game;
+      const arrows = g.hazards.filter((h: any) => h.active && h.kind === 'skyarrow');
+      return { count: arrows.length, falling: arrows.every((h: any) => h.drop && h.drop.position.y > 1) };
+    });
+  };
+  const one = await arrowsAfterDash(1);
+  check('fase 1: o salto não chama flechas do céu', one.count === 0, one);
+  const two = await arrowsAfterDash(2);
+  check('fase 2: o salto marca 3 flechas caindo do céu', two.count === 3 && two.falling, two);
+  // they fall in world time: standing still keeps them up
+  const still = await page.evaluate(() => (window as any).__MOVESTOP__.game.hazards.filter((h: any) => h.kind === 'skyarrow').length);
+  await page.waitForTimeout(1200);
+  const stillAfter = await page.evaluate(() => (window as any).__MOVESTOP__.game.hazards.filter((h: any) => h.kind === 'skyarrow').length);
+  check('com o tempo parado as flechas ficam no ar', still === 3 && stillAfter === 3, { antes: still, depois: stillAfter });
+  await pace(page, 2500);
+  const landed = await page.evaluate(() => (window as any).__MOVESTOP__.game.hazards.filter((h: any) => h.kind === 'skyarrow').length);
+  check('andando, elas caem e somem', landed === 0, { restantes: landed });
+}
+
 async function roninOnlyHurtWhenOpen(page: Page): Promise<void> {
   await resetArena(page, true);
   await spawnNear(page, 'ronin', 0, -1.7);
@@ -613,6 +710,8 @@ await runE2E({
     dodgeOnlyOnImpossible,
     roninParriesBullets,
     roninShurikenFan,
+    roninComboOnImpossible,
+    roninSkyArrows,
     parryAnimations,
     roninOnlyHurtWhenOpen,
     roninPhaseTwo,

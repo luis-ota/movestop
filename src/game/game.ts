@@ -21,8 +21,11 @@ import { NavGrid } from './navigation';
 import { dodgeDirection } from './dodge';
 import {
   byPhase,
+  COMBO_FOLLOWUP,
   chooseRoninAttack,
   roninHealthAfterHit,
+  rushLength,
+  skyArrowTargets,
   type RoninAttack,
   type RoninPhase,
   type RoninTuning,
@@ -258,6 +261,12 @@ interface RoninState {
   dashX: number;
   dashZ: number;
   volleyLeft: number;
+  /** combo attacks still to come after the current one (Impossible) */
+  queue: RoninAttack[];
+  /** world seconds until the combo can start again */
+  comboCd: number;
+  /** length of the current rush, set when it starts */
+  rushLength: number;
   marks: RoninMarks;
 }
 
@@ -312,7 +321,8 @@ interface DestructibleRock {
 }
 
 interface GroundHazard {
-  kind: 'mortar' | 'ward';
+  /** skyarrow: the ronin's phase-2 rain, an arrow falling on a marked spot */
+  kind: 'mortar' | 'ward' | 'skyarrow';
   x: number;
   z: number;
   radius: number;
@@ -325,6 +335,8 @@ interface GroundHazard {
   mesh: THREE.Group;
   disc: THREE.Mesh;
   ring: THREE.Mesh;
+  /** the falling arrow above a skyarrow mark (shared geometry and material) */
+  drop: THREE.Mesh | null;
 }
 
 interface Boss {
@@ -369,6 +381,11 @@ const SETTLE_FRAMES = 60;
 
 /** Shared empty list: no allocation per frame when dodging is off. */
 const NO_THREATS: readonly never[] = [];
+
+/** Height a sky arrow starts falling from, and its shared mesh parts. */
+const SKY_ARROW_HEIGHT = 5;
+const SKY_ARROW_GEO = new THREE.BoxGeometry(0.1, 1.3, 0.1);
+const SKY_ARROW_MAT = new THREE.MeshBasicMaterial({ color: 0xffe7a8 });
 
 /** How fast enemies turn to face the player, in world time. */
 const ENEMY_TURN_RATE = 9;
@@ -2717,6 +2734,9 @@ export class Game {
       dashX: 0,
       dashZ: 0,
       volleyLeft: 0,
+      queue: [],
+      comboCd: tuning.combo.cooldown * 0.5,
+      rushLength: 0,
       marks: this.buildRoninMarks(tuning, color, x, z),
     };
   }
@@ -2816,6 +2836,7 @@ export class Game {
     switch (r.mode) {
       case 'stalk': {
         r.cooldown = Math.max(0, r.cooldown - simDt);
+        r.comboCd = Math.max(0, r.comboCd - simDt);
         e.avatar.setCharge(0);
         const stillDt = r.phase === 2 ? Math.max(0, realDt - simDt) : 0;
         if (dist > t.meleeRange * 0.85) {
@@ -2831,8 +2852,15 @@ export class Game {
         }
         if (r.cooldown > 0 || !see) break;
         const awaySpeed = p.vx * dirX + p.vz * dirZ; // dir points from him to the player
-        const attack = chooseRoninAttack({ dist, phase: r.phase, awaySpeed, last: r.last, roll: Math.random() }, t);
-        if (attack) this.startRoninAttack(e, r, attack, targetAngle);
+        const comboReady = this.difficulty.id === 'impossible' && r.comboCd <= 0;
+        const choice = chooseRoninAttack({ dist, phase: r.phase, awaySpeed, last: r.last, roll: Math.random(), comboReady }, t);
+        if (choice === 'combo') {
+          r.queue = [...COMBO_FOLLOWUP];
+          r.comboCd = t.combo.cooldown;
+          this.startRoninAttack(e, r, 'rush', targetAngle);
+        } else if (choice) {
+          this.startRoninAttack(e, r, choice, targetAngle);
+        }
         break;
       }
       case 'windup': {
@@ -2841,6 +2869,9 @@ export class Game {
         if (r.attack === 'shuriken') {
           r.aim = targetAngle;
           this.showRoninLanes(r, r.aim, byPhase(t.shuriken.count, r.phase), t.shuriken.spread);
+        } else if (r.attack === 'flank') {
+          r.aim = targetAngle;
+          this.showRoninLanes(r, r.aim, 2, t.combo.flank.angle * 2);
         }
         e.angle = r.aim;
         e.avatar.group.rotation.y = e.angle;
@@ -2851,6 +2882,7 @@ export class Game {
           // like every other committed attack, breaking line of sight cancels it
           r.mode = 'stalk';
           r.cooldown = 0.4;
+          r.queue.length = 0;
           this.hideRoninAttackMarks(r);
           e.avatar.setCharge(0);
           break;
@@ -2875,6 +2907,7 @@ export class Game {
           r.mode = 'volley';
           r.volleyLeft = byPhase(t.arrows.count, r.phase);
           r.timer = byPhase(t.arrows.gap, r.phase);
+          this.rainRoninArrows(e, r);
         }
         break;
       }
@@ -2911,7 +2944,11 @@ export class Game {
         ? byPhase(t.heavy.windup, r.phase)
         : attack === 'quickcut'
           ? t.quickcut.windup
-          : byPhase(t.shuriken.windup, r.phase);
+          : attack === 'rush'
+            ? t.combo.rush.windup
+            : attack === 'flank'
+              ? t.combo.flank.windup
+              : byPhase(t.shuriken.windup, r.phase);
     r.mode = 'windup';
     r.attack = attack;
     r.aim = aim;
@@ -2921,9 +2958,17 @@ export class Game {
     if (attack === 'heavy') {
       r.marks.heavy.visible = true;
       r.marks.heavy.rotation.y = aim;
-    } else if (attack === 'quickcut') {
+    } else if (attack === 'quickcut' || attack === 'rush') {
+      const p = this.player!;
+      r.rushLength = attack === 'rush' ? rushLength(Math.hypot(p.x - e.x, p.z - e.z), t) : t.quickcut.length;
       r.marks.quick.visible = true;
       r.marks.quick.rotation.y = aim;
+      // the lane is built at the quick cut's size; stretch it to this rush
+      const widthScale = attack === 'rush' ? t.combo.rush.width / t.quickcut.width : 1;
+      const reach = attack === 'rush' ? t.combo.rush.reach : 0;
+      r.marks.quick.scale.set(widthScale, 1, (r.rushLength + reach) / t.quickcut.length);
+    } else if (attack === 'flank') {
+      this.showRoninLanes(r, aim, 2, t.combo.flank.angle * 2);
     } else {
       this.showRoninLanes(r, aim, byPhase(t.shuriken.count, r.phase), t.shuriken.spread);
     }
@@ -2969,23 +3014,22 @@ export class Game {
     }
 
     if (attack === 'quickcut') {
-      const x0 = e.x;
-      const z0 = e.z;
-      const dx = Math.sin(r.aim);
-      const dz = Math.cos(r.aim);
-      this.moveEnemy(e, dx * t.quickcut.length, dz * t.quickcut.length);
-      // anything on the path he actually travelled is cut
-      const sx = e.x - x0;
-      const sz = e.z - z0;
-      const len2 = sx * sx + sz * sz || 1e-6;
-      const k = clamp(((p.x - x0) * sx + (p.z - z0) * sz) / len2, 0, 1);
-      const off = Math.hypot(p.x - (x0 + sx * k), p.z - (z0 + sz * k));
-      this.fx.slash(e.x, e.z, r.aim, 0xff3b2e, 1.8, false);
-      this.fx.afterimage(x0, z0, r.aim, 0xff3b2e);
-      audio.slash(true);
-      if (off < t.quickcut.width / 2 + Game.PLAYER_RADIUS && !this.parriedRoninCut(e)) this.hitPlayer();
+      this.roninRush(e, r, t.quickcut.length, t.quickcut.width);
       r.mode = 'stalk';
       r.cooldown = Math.max(t.quickcut.recovery, this.roninCooldown(r));
+      return;
+    }
+
+    if (attack === 'rush') {
+      this.roninRush(e, r, r.rushLength, t.combo.rush.width, t.combo.rush.reach);
+      this.nextRoninComboStep(e, r);
+      return;
+    }
+
+    if (attack === 'flank') {
+      // two stars at aim +/- angle: the centre stays open, toward the cut that follows
+      this.fireRoninProjectile(e, 'shuriken', 2, t.combo.flank.angle * 2, t.combo.flank.speed);
+      this.nextRoninComboStep(e, r);
       return;
     }
 
@@ -2995,7 +3039,58 @@ export class Game {
     r.cooldown = this.roninCooldown(r);
   }
 
-  private fireRoninProjectile(e: Enemy, kind: 'shuriken' | 'arrow'): void {
+  /**
+   * A straight dash along the locked aim: anything on the path he travelled,
+   * plus `reach` of blade past where he stopped, is cut.
+   */
+  private roninRush(e: Enemy, r: RoninState, length: number, width: number, reach = 0): void {
+    const p = this.player!;
+    const x0 = e.x;
+    const z0 = e.z;
+    this.moveEnemy(e, Math.sin(r.aim) * length, Math.cos(r.aim) * length);
+    const sx = e.x - x0 + Math.sin(r.aim) * reach;
+    const sz = e.z - z0 + Math.cos(r.aim) * reach;
+    const len2 = sx * sx + sz * sz || 1e-6;
+    const k = clamp(((p.x - x0) * sx + (p.z - z0) * sz) / len2, 0, 1);
+    const off = Math.hypot(p.x - (x0 + sx * k), p.z - (z0 + sz * k));
+    this.fx.slash(e.x, e.z, r.aim, 0xff3b2e, 1.8, false);
+    this.fx.afterimage(x0, z0, r.aim, 0xff3b2e);
+    audio.slash(true);
+    if (off < width / 2 + Game.PLAYER_RADIUS && !this.parriedRoninCut(e)) this.hitPlayer();
+  }
+
+  /** Chains the next combo attack, aimed at where the player is now; the heavy cut ends it. */
+  private nextRoninComboStep(e: Enemy, r: RoninState): void {
+    const next = r.queue.shift();
+    if (!next) {
+      r.mode = 'stalk';
+      r.cooldown = this.roninCooldown(r);
+      return;
+    }
+    const p = this.player!;
+    const aim = Math.atan2(p.x - e.x, p.z - e.z);
+    e.angle = aim;
+    e.avatar.group.rotation.y = aim;
+    this.startRoninAttack(e, r, next, aim);
+  }
+
+  /** Phase 2: marks where the sky arrows land; they fall in world time like everything he does. */
+  private rainRoninArrows(e: Enemy, r: RoninState): void {
+    const t = r.tuning.skyArrows;
+    const count = byPhase(t.count, r.phase);
+    if (count <= 0) return;
+    const p = this.player!;
+    const px = p.x + p.vx * t.lead;
+    const pz = p.z + p.vz * t.lead;
+    for (const spot of skyArrowTargets(px, pz, px - e.x, pz - e.z, count, t.spacing)) {
+      resolveCircle(spot, 0.16, this.colliders);
+      this.createHazard('skyarrow', spot.x, spot.z, t.radius, t.fuse, 'world', e);
+    }
+    this.fx.sparks(e.x, 1.6, e.z, 0xffe7a8, 6, 4);
+    audio.enemyShoot();
+  }
+
+  private fireRoninProjectile(e: Enemy, kind: 'shuriken' | 'arrow', fanCount?: number, fanSpread?: number, fanSpeed?: number): void {
     const p = this.player!;
     const r = e.ronin!;
     const t = r.tuning;
@@ -3011,10 +3106,11 @@ export class Game {
       audio.enemyShoot();
       return;
     }
-    const count = byPhase(t.shuriken.count, r.phase);
-    const speed = byPhase(t.shuriken.speed, r.phase) * bulletMult;
+    const count = fanCount ?? byPhase(t.shuriken.count, r.phase);
+    const spread = fanSpread ?? t.shuriken.spread;
+    const speed = (fanSpeed ?? byPhase(t.shuriken.speed, r.phase)) * bulletMult;
     for (let i = 0; i < count; i++) {
-      const a = r.aim + (i - (count - 1) / 2) * t.shuriken.spread;
+      const a = r.aim + (i - (count - 1) / 2) * spread;
       const sx = e.x + Math.sin(a) * t.throwOffset;
       const sz = e.z + Math.cos(a) * t.throwOffset;
       this.spawnBullet(sx, sz, a, speed, 'enemy', 0xd8dce8, 0xb8c0d8, 0.8, false, e);
@@ -3071,6 +3167,7 @@ export class Game {
     r.dashZ = dz / dl;
     r.timer = r.tuning.dash.time;
     r.attack = null;
+    r.queue.length = 0;
     this.hideRoninAttackMarks(r);
     this.fx.afterimage(e.x, e.z, e.angle, e.def.color);
     this.emitHud();
@@ -3141,7 +3238,7 @@ export class Game {
     clock: GroundHazard['clock'],
     owner: Enemy | null,
   ): void {
-    const color = kind === 'mortar' ? 0xff6a2c : 0xe8d7a1;
+    const color = kind === 'mortar' ? 0xff6a2c : kind === 'skyarrow' ? 0xff3b2e : 0xe8d7a1;
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     const disc = new THREE.Mesh(
@@ -3172,8 +3269,15 @@ export class Game {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.045;
     group.add(disc, ring);
+    let drop: THREE.Mesh | null = null;
+    if (kind === 'skyarrow') {
+      drop = new THREE.Mesh(SKY_ARROW_GEO, SKY_ARROW_MAT);
+      drop.position.y = SKY_ARROW_HEIGHT;
+      group.add(drop);
+    }
     this.gameGroup.add(group);
-    this.hazards.push({ kind, x, z, radius, age: 0, duration, clock, armed: kind === 'mortar', active: true, owner, mesh: group, disc, ring });
+    const armed = kind === 'mortar' || kind === 'skyarrow';
+    this.hazards.push({ kind, x, z, radius, age: 0, duration, clock, armed, active: true, owner, mesh: group, disc, ring, drop });
   }
 
   private updateHazards(realDt: number, simDt: number): void {
@@ -3196,6 +3300,8 @@ export class Game {
       (h.disc.material as THREE.MeshBasicMaterial).opacity = 0.1 + t * 0.24;
       (h.ring.material as THREE.MeshBasicMaterial).opacity = 0.55 + t * 0.45;
       h.ring.scale.setScalar(0.94 + t * 0.08);
+      // the arrow falls faster as it nears the ground
+      if (h.drop) h.drop.position.y = 0.65 + (SKY_ARROW_HEIGHT - 0.65) * (1 - t * t);
       if (h.age < h.duration) continue;
       h.active = false;
       this.explodeHazard(h);
@@ -3206,10 +3312,16 @@ export class Game {
 
   private explodeHazard(h: GroundHazard): void {
     const p = this.player!;
-    const color = h.kind === 'mortar' ? 0xff6a2c : 0xe8d7a1;
+    const color = h.kind === 'mortar' ? 0xff6a2c : h.kind === 'skyarrow' ? 0xff3b2e : 0xe8d7a1;
     this.fx.shock(h.x, h.z, color, h.kind === 'mortar' ? h.radius * 1.8 : h.radius * 1.35);
     this.shake = Math.max(this.shake, h.kind === 'mortar' ? 0.38 : 0.2);
     audio.hit();
+    if (h.kind === 'skyarrow') {
+      // it falls straight down: no line of sight needed, and it only threatens the player
+      if (Math.hypot(p.x - h.x, p.z - h.z) < h.radius) this.hitPlayer();
+      this.fx.sparks(h.x, 0.3, h.z, 0xffe7a8, 6, 3);
+      return;
+    }
     if (Math.hypot(p.x - h.x, p.z - h.z) < h.radius && this.hasLOS(h.x, h.z, p.x, p.z)) this.hitPlayer();
     for (const e of this.enemies) {
       if (!e.alive || Math.hypot(e.x - h.x, e.z - h.z) >= h.radius) continue;

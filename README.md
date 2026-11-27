@@ -11,7 +11,7 @@ Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three
 
 MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de nove fases (com o midboss Ronin e o chefe O Relojoeiro) e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
 
-Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 127 testes automatizados (`bun test`) de movimento, navegação e IA dos inimigos, combate, dificuldade, save, ritmo de quadros, protocolo, rounds, snapshots, abuso e política de proxy, além de verificações no navegador (`bun run test:e2e`).
+Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 140 testes automatizados (`bun test`) de movimento, navegação e IA dos inimigos, combate, dificuldade, save, ritmo de quadros, protocolo, rounds, snapshots, abuso e política de proxy, além de verificações no navegador (`bun run test:e2e`).
 
 <p align="center">
   <img src="docs/assets/movestop-duel.jpg" alt="Duelo online do MOVESTOP no pátio de outono" width="720">
@@ -97,7 +97,7 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/game/game.ts` — engine, câmera, combate, IA, ondas, chefe.
 - `src/game/levels.ts` — nove fases, inimigos e expansão do campo aberto.
 - `src/game/navigation.ts` / `src/game/dodge.ts` — rotas dos inimigos (campo de fluxo) e desvio de tiros no Impossível.
-- `src/game/ronin.ts` — regras do midboss Ronin.
+- `src/game/ronin.ts` — regras do midboss Ronin (combo do Impossível e flechas do céu na fase 2).
 - `src/game/landscape.ts` — vale, rio, ponte, templo, árvores, clima.
 - `src/game/backdrop.ts` — panorama pintado das montanhas, sol/lua e floresta distante.
 - `src/game/voxel.ts` — avatares, haori, lâmina, sombras.
@@ -105,7 +105,7 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/ui/online.ts` / `src/online.css` — lobby, fila, HUD e resultado do duelo.
 - `src/multiplayer/` — transporte WebSocket e adaptador de input.
 - `server/` — servidor autoritativo, salas, validação e hardening.
-- `tests/` — 127 testes de movimento, navegação, IA, dificuldade, save, ritmo de quadros, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+- `tests/` — 140 testes de movimento, navegação, IA, dificuldade, save, ritmo de quadros, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
 - `e2e/` — verificações no navegador: inimigos no sandbox, renderização e economia de energia.
 
 ## Open source

@@ -458,6 +458,14 @@ export const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
       shuriken: { windup: [0.42, 0.26], count: [3, 5], spread: 0.32, speed: [10, 12.5] },
       arrows: { count: [3, 4], gap: [0.22, 0.14], speed: 15, lead: 0.06 },
       dash: { distance: 5.2, time: 0.28 },
+      skyArrows: { count: [0, 3], radius: 0.95, fuse: 0.9, spacing: 2.6, lead: 0.25 },
+      combo: {
+        minRange: 3.2,
+        maxRange: 8,
+        cooldown: 6,
+        rush: { windup: 0.38, stopShort: 1.4, reach: 1.7, maxLength: 7, width: 0.9 },
+        flank: { windup: 0.2, angle: 0.42, speed: 12 },
+      },
     },
   },
 };
