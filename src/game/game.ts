@@ -3027,6 +3027,7 @@ export class Game {
   private hitRonin(e: Enemy): void {
     const r = e.ronin!;
     if (r.mode !== 'recover') {
+      e.avatar.guard();
       this.fx.sparks(e.x, 1.0, e.z, 0xffe08a, 8, 4);
       this.fx.ring(e.x, e.z, 0xffe08a, 0.9, 0.2);
       audio.parry();
@@ -3424,6 +3425,7 @@ export class Game {
       this.moveEnemy(e, (b.vx / vlen) * push, (b.vz / vlen) * push);
     }
     if (e.ronin) {
+      e.avatar.guard();
       this.fx.sparks(px, 0.9, pz, 0xffe08a, 8, 4);
       audio.parry();
     } else {

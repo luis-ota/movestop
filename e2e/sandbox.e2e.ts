@@ -34,6 +34,15 @@ async function resetArena(page: Page, invulnerable: boolean): Promise<void> {
     g.setSandboxOption('infiniteAmmo', true);
   }, invulnerable);
   await page.waitForFunction(() => (window as any).__MOVESTOP__.game.state === 'playing');
+  // back to the spawn: earlier scenarios walk the player around, and ending up
+  // next to cover changes line of sight for the next one
+  await page.evaluate(() => {
+    const p = (window as any).__MOVESTOP__.game.player;
+    p.x = p.spawnX;
+    p.z = p.spawnZ;
+    p.vx = 0;
+    p.vz = 0;
+  });
 }
 
 /** Spawns `type` at an offset from the player, already past its spawn grace. */
@@ -395,6 +404,45 @@ async function roninParriesBullets(page: Page): Promise<void> {
   check('Ronin aparece na barra de chefe com 6 acertos', bar.max === 6 && bar.hp === 6, bar);
 }
 
+/** Parry animations: the player's guard pose and the Ronin's blade guard. */
+async function parryAnimations(page: Page): Promise<void> {
+  await resetArena(page, true);
+  await page.waitForTimeout(400); // parry cooldown from earlier scenarios
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(90);
+  const player = await page.evaluate(() => {
+    const a = (window as any).__MOVESTOP__.game.player.avatar;
+    return { guard: +a.guardAmount().toFixed(2), bladeOut: a.blade.visible, katanaYaw: +a.katana.rotation.y.toFixed(2) };
+  });
+  check('aparo do jogador: lâmina sacada e atravessada na guarda', player.bladeOut && player.katanaYaw > 1.2, player);
+
+  await spawnNear(page, 'ronin', 0, -6);
+  await page.evaluate(() => {
+    const g = (window as any).__MOVESTOP__.game;
+    const e = g.enemies.find((n: any) => n.alive && n.type === 'ronin');
+    e.ronin.cooldown = 99; // keep him from attacking during the check
+    g.__guards = 0;
+    g.__maxYaw = 0;
+    const original = e.avatar.guard.bind(e.avatar);
+    e.avatar.guard = () => {
+      g.__guards++;
+      original();
+    };
+    const blade = e.avatar.guardBlade;
+    const watch = () => {
+      g.__maxYaw = Math.max(g.__maxYaw, blade.rotation.y);
+      if (e.alive) requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
+  await shootAt(page, 'ronin', 3);
+  const ronin = await page.evaluate(() => {
+    const g = (window as any).__MOVESTOP__.game;
+    return { guards: g.__guards, maxBladeYaw: +g.__maxYaw.toFixed(2) };
+  });
+  check('Ronin apara com a lâmina na guarda', ronin.guards > 0 && ronin.maxBladeYaw > 1, ronin);
+}
+
 async function roninShurikenFan(page: Page): Promise<void> {
   await resetArena(page, true);
   await spawnNear(page, 'ronin', 0, -6);
@@ -562,6 +610,7 @@ await runE2E({
     dodgeOnlyOnImpossible,
     roninParriesBullets,
     roninShurikenFan,
+    parryAnimations,
     roninOnlyHurtWhenOpen,
     roninPhaseTwo,
     roninCreepsOnlyInPhaseTwo,

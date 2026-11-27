@@ -290,16 +290,41 @@ export class PlayerAvatar {
       this.torso.rotation.y = -swingSlash * 0.42;
       this.blade.visible = this.slashPulse > 0.015;
     } else {
-      this.katana.position.set(-0.33, 0.5, -0.06);
-      this.katana.rotation.y += (0.55 - this.katana.rotation.y) * Math.min(1, dt * 12);
-      this.katana.rotation.z += (0.08 + this.parryPulse * 0.9 - this.katana.rotation.z) * Math.min(1, dt * 12);
-      this.katana.rotation.x += (0 - this.katana.rotation.x) * Math.min(1, dt * 12);
-      this.armR.rotation.x += (0 - this.armR.rotation.x) * Math.min(1, dt * 12);
-      this.torso.rotation.y += (0 - this.torso.rotation.y) * Math.min(1, dt * 12);
-      this.blade.visible = false;
+      this.poseGuard(dt);
     }
     this.accentMat.emissiveIntensity = 0.9 + timeScale * 0.7 + this.parryPulse * 2.4 + this.slashPulse * 0.7;
 
+  }
+
+  /** 0..1: how far into the parry guard the body is right now (eased). */
+  guardAmount(): number {
+    return Math.sin(Math.min(1, this.parryPulse) * Math.PI * 0.5);
+  }
+
+  /**
+   * Rest pose blended toward the parry guard: the blade drawn and held across
+   * the chest, both arms up, a small lean back. Snaps in (the parry window is
+   * short) and eases out. A deflect that aims its return can hook in here.
+   */
+  private poseGuard(dt: number): void {
+    const g = this.guardAmount();
+    const into = Math.min(1, dt * (g > 0 ? 26 : 12));
+    const toward = (from: number, to: number) => from + (to - from) * into;
+    const lerp = (a: number, b: number) => a + (b - a) * g;
+    this.katana.position.set(
+      toward(this.katana.position.x, lerp(-0.33, 0.02)),
+      toward(this.katana.position.y, lerp(0.5, 0.74)),
+      toward(this.katana.position.z, lerp(-0.06, 0.3)),
+    );
+    this.katana.rotation.y = toward(this.katana.rotation.y, lerp(0.55, Math.PI / 2));
+    this.katana.rotation.z = toward(this.katana.rotation.z, lerp(0.08, 0));
+    this.katana.rotation.x = toward(this.katana.rotation.x, 0);
+    this.armR.rotation.x = toward(this.armR.rotation.x, -1.35 * g);
+    // the walk swing already set the left arm this frame: lift it on top
+    this.armL.rotation.x += -1.15 * g;
+    this.torso.rotation.x += -0.12 * g;
+    this.torso.rotation.y = toward(this.torso.rotation.y, 0);
+    this.blade.visible = g > 0.3;
   }
 }
 
@@ -315,6 +340,9 @@ export class EnemyAvatar {
   private flashValue = 0;
   /** stone does not breathe: no idle bob */
   private readonly still: boolean;
+  /** the Ronin's katana: kept out of the baked body so it can snap into a guard */
+  private guardBlade: THREE.Mesh | null = null;
+  private guardPulse = 0;
   /** materials that fade with setOpacity, with their resting opacity */
   private fadeMats: { mat: THREE.Material; base: number }[] = [];
   private fadeMeshes: THREE.Mesh[] = [];
@@ -431,6 +459,7 @@ export class EnemyAvatar {
       scabbard.rotation.y = 0.2;
       const blade = voxel(0.04, 0.05, 0.62, accentMat, 0.34, 0.48, 0.3);
       blade.rotation.x = -0.25;
+      this.guardBlade = blade;
       const bow = voxel(0.05, 1.05, 0.05, gunMat, 0.12, 0.6, -0.24);
       bow.rotation.z = 0.35;
       const quiver = voxel(0.12, 0.42, 0.12, this.darkMat, -0.16, 0.7, -0.24);
@@ -439,7 +468,9 @@ export class EnemyAvatar {
     }
 
     // the body only bobs as a whole; the eyes scale with the charge
-    mergeStaticParts(this.group, [this.eyeL, this.eyeR]);
+    const animated: THREE.Object3D[] = [this.eyeL, this.eyeR];
+    if (this.guardBlade) animated.push(this.guardBlade);
+    mergeStaticParts(this.group, animated);
 
     this.group.add(contactShadow(0.86));
     this.ring = new THREE.Mesh(
@@ -485,6 +516,22 @@ export class EnemyAvatar {
     for (const mesh of this.fadeMeshes) mesh.castShadow = shadow;
   }
 
+  /** The Ronin parried a bullet or blocked a cut: snap the blade into a guard. */
+  guard(): void {
+    if (this.guardBlade) this.guardPulse = 1;
+  }
+
+  /** Blade at the hip blended toward a guard held across the chest. */
+  private poseGuard(dt: number): void {
+    const blade = this.guardBlade;
+    if (!blade) return;
+    this.guardPulse = Math.max(0, this.guardPulse - dt * 3.5);
+    const g = Math.sin(Math.min(1, this.guardPulse) * Math.PI * 0.5);
+    const lerp = (a: number, b: number) => a + (b - a) * g;
+    blade.position.set(lerp(0.34, 0), lerp(0.48, 0.66), lerp(0.3, 0.46));
+    blade.rotation.set(lerp(-0.25, 0), lerp(0, Math.PI / 2), 0);
+  }
+
   setCharge(v: number): void {
     this.eyeMat.emissiveIntensity = 1 + v * 3;
     this.eyeMat.emissive.setRGB(1, 0.3 + v * 0.55, 0.18 + v * 0.6);
@@ -502,6 +549,7 @@ export class EnemyAvatar {
   animate(dt: number, timeScale: number): void {
     this.phase += dt * (1.4 + timeScale * 2.5);
     this.group.position.y = this.still ? 0 : Math.sin(this.phase) * 0.012;
+    this.poseGuard(dt);
     this.flashValue = Math.max(0, this.flashValue - dt * 5);
     this.bodyMat.emissive.setRGB(this.flashValue * 0.9, this.flashValue * 0.55, this.flashValue * 0.2);
     this.bodyMat.emissiveIntensity = this.flashValue * 1.8;
