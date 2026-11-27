@@ -638,14 +638,14 @@ export const LEVELS: LevelDef[] = [
     reward: 240,
     fireScale: 1,
     speedScale: 1.08,
-    hint: 'O laser do PRECISÃO mostra a linha. O círculo do ARTILHEIRO não espera o tempo parar.',
+    hint: 'O laser do PRECISÃO pede que você pare. A ESTÁTUA anda enquanto você espera. O círculo do ARTILHEIRO não espera o tempo parar.',
     waves: [
       [
         { type: 'sniper', at: [2, 14] },
         { type: 'sniper', at: [10, 2] },
       ],
       [
-        { type: 'gunner', at: [9, 15] },
+        { type: 'statue', at: [9, 15] },
         { type: 'sniper', at: [1, 8] },
         { type: 'sniper', at: [11, 13] },
       ],
@@ -707,7 +707,7 @@ export const LEVELS: LevelDef[] = [
     id: 6,
     act: 2,
     name: 'VIDRO\nFUMÊ',
-    subtitle: 'Paredes têm janelas. Barris têm pressa.',
+    subtitle: 'Nem tudo aparece enquanto você anda. Barris têm pressa.',
     grid: [
       '#################',
       '#...............#',
@@ -728,7 +728,7 @@ export const LEVELS: LevelDef[] = [
     reward: 320,
     fireScale: 1.08,
     speedScale: 1.04,
-    hint: 'Barris explodem em cadeia. E não perguntam de que lado você está.',
+    hint: 'A SOMBRA só aparece com o tempo parado: siga o rastro de poeira. Barris explodem em cadeia.',
     waves: [
       [
         { type: 'shield', at: [2, 14] },
@@ -738,10 +738,10 @@ export const LEVELS: LevelDef[] = [
       [
         { type: 'burster', at: [1, 8] },
         { type: 'burster', at: [11, 8] },
-        { type: 'shield', at: [6, 14] },
+        { type: 'ninja', at: [6, 14] },
       ],
       [
-        { type: 'shield', at: [3, 14] },
+        { type: 'ninja', at: [3, 14] },
         { type: 'shield', at: [9, 2] },
         { type: 'burster', at: [11, 4] },
         { type: 'gunner', at: [1, 1] },
@@ -750,6 +750,36 @@ export const LEVELS: LevelDef[] = [
   },
   {
     id: 7,
+    act: 3,
+    name: 'DUELO NO\nBAMBU',
+    subtitle: 'Ele apara toda bala. Espere a espada descer.',
+    grid: [
+      '#################',
+      '#...............#',
+      '#...............#',
+      '#...#.......#...#',
+      '#...............#',
+      '#...............#',
+      '#...............#',
+      '#...#.......#...#',
+      '#...............#',
+      '#.......P.......#',
+      '#...............#',
+      '#...............#',
+      '#################',
+    ],
+    // a sword duel: he parries every bullet, so there are none to waste
+    ammo: 0,
+    noAmmoDrops: true,
+    par: 90,
+    reward: 450,
+    fireScale: 1,
+    speedScale: 1,
+    hint: 'Balas não passam. Depois do golpe pesado ele fica aberto: corte. Ao ser atingido ele recua e atira flechas.',
+    waves: [[{ type: 'ronin', at: [4, 8] }]],
+  },
+  {
+    id: 8,
     act: 3,
     name: 'CERCO',
     subtitle: 'Todos os tipos. Nenhuma saída fácil. Só o seu próximo passo.',
@@ -787,7 +817,7 @@ export const LEVELS: LevelDef[] = [
         { type: 'sniper', at: [1, 8] },
       ],
       [
-        { type: 'hunter', at: [2, 3] },
+        { type: 'statue', at: [2, 3] },
         { type: 'hunter', at: [2, 14] },
         { type: 'shield', at: [9, 14] },
         { type: 'warden', at: [11, 8] },
@@ -797,12 +827,12 @@ export const LEVELS: LevelDef[] = [
         { type: 'burster', at: [11, 2] },
         { type: 'shield', at: [8, 14] },
         { type: 'sniper', at: [10, 15] },
-        { type: 'hunter', at: [2, 9] },
+        { type: 'ninja', at: [2, 9] },
       ],
     ],
   },
   {
-    id: 8,
+    id: 9,
     act: 3,
     name: 'O\nRELOJOEIRO',
     subtitle: 'Ele fabrica o tempo que você gasta. Não dê a ele mais um segundo.',
@@ -867,14 +897,14 @@ export function expandLevel(level: LevelDef, margin = 4): LevelDef {
   }
 
   const shift = (n: number) => n - 1 + margin;
-  const extraCount: Record<number, number> = { 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2 };
+  const extraCount: Record<number, number> = { 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 8: 2 };
   const extraType: Record<number, EnemyType> = {
     2: 'shield',
     3: 'gunner',
     4: 'burster',
     5: 'hunter',
     6: 'shield',
-    7: 'gunner',
+    8: 'gunner',
   };
   const fieldPoints: [number, number][] = [
     [margin + 2, cols - margin + 1],

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { ENEMY_DEFS, LEVELS, expandLevel } from '../src/game/levels';
+import type { Box } from '../src/game/movement';
+import { NavGrid } from '../src/game/navigation';
 
 describe('campanha', () => {
   it('apresenta os novos inimigos com funções distintas', () => {
@@ -47,19 +49,65 @@ describe('campanha', () => {
     expect(strike.flankOffset).toBeLessThan(strike.triggerRange);
   });
 
-  it('estátua, ninja e ronin ainda não entram na campanha', () => {
-    const used = new Set(LEVELS.flatMap((level) => level.waves.flat().map((spawn) => spawn.type)));
-    expect(used.has('statue')).toBe(false);
-    expect(used.has('ninja')).toBe(false);
-    expect(used.has('ronin')).toBe(false);
+  const types = (id: number) => LEVELS.find((level) => level.id === id)!.waves.flat().map((spawn) => spawn.type);
+
+  it('são nove fases, três por ato, com ids em ordem e o chefe por último', () => {
+    expect(LEVELS.map((l) => l.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    for (const act of [1, 2, 3]) expect(LEVELS.filter((l) => l.act === act)).toHaveLength(3);
+    expect(LEVELS[LEVELS.length - 1].boss).toBeDefined();
+    expect(LEVELS.filter((l) => l.boss)).toHaveLength(1);
   });
 
   it('introduz morteiro e monge em fases diferentes', () => {
-    const types = (id: number) => LEVELS.find((level) => level.id === id)!.waves.flat().map((spawn) => spawn.type);
     expect(types(4)).toContain('mortar');
     expect(types(4)).not.toContain('warden');
-    expect(types(7)).toContain('mortar');
-    expect(types(7)).toContain('warden');
+    expect(types(8)).toContain('mortar');
+    expect(types(8)).toContain('warden');
+  });
+
+  it('a Estátua chega na Sala de Espera e a Sombra no Vidro Fumê', () => {
+    expect(types(4)).toContain('statue');
+    expect(types(6)).toContain('ninja');
+    // the siege promises every type
+    expect(types(8)).toEqual(expect.arrayContaining(['statue', 'ninja', 'hunter', 'shield', 'sniper', 'mortar', 'warden']));
+  });
+
+  it('o Ronin luta sozinho, num duelo sem balas, antes do Cerco', () => {
+    const duel = LEVELS.find((l) => l.id === 7)!;
+    expect(types(7)).toEqual(['ronin']);
+    expect(duel.ammo).toBe(0);
+    expect(duel.noAmmoDrops).toBe(true);
+    // no field extras sneak into the duel when the arena is expanded
+    expect(expandLevel(duel, 9).waves.flat().map((s) => s.type)).toEqual(['ronin']);
+    expect(LEVELS.find((l) => l.id === 8)!.name).toBe('CERCO');
+  });
+
+  it('todo inimigo nasce em chão livre e consegue chegar ao jogador', () => {
+    for (const authored of LEVELS) {
+      const level = expandLevel(authored, 9);
+      const rows = level.grid.length;
+      const cols = level.grid[0].length;
+      const halfW = (cols - 1) / 2;
+      const halfH = (rows - 1) / 2;
+      const boxes: Box[] = [];
+      level.grid.forEach((row, r) =>
+        [...row].forEach((ch, c) => {
+          if (!'#xbR'.includes(ch)) return; // walls, crates, barrels, rocks
+          boxes.push({ minX: c - halfW - 0.5, maxX: c - halfW + 0.5, minZ: r - halfH - 0.5, maxZ: r - halfH + 0.5, active: true });
+        }),
+      );
+      const pr = level.grid.findIndex((row) => row.includes('P'));
+      const player = { x: level.grid[pr].indexOf('P') - halfW, z: pr - halfH };
+      const nav = new NavGrid(cols, rows);
+      nav.update(boxes, player.x, player.z);
+      for (const spawn of level.waves.flat()) {
+        const [r, c] = spawn.at;
+        const where = `fase ${authored.id}, ${spawn.type} em [${r},${c}]`;
+        expect({ where, cell: level.grid[r]?.[c] }).toEqual({ where, cell: expect.stringMatching(/^[.oP]$/) });
+        const reach = nav.distanceAt(nav.cellOf(c - halfW, r - halfH));
+        expect({ where, reachable: Number.isFinite(reach) }).toEqual({ where, reachable: true });
+      }
+    }
   });
 
   it('preserva pedras destrutíveis ao expandir a arena', () => {

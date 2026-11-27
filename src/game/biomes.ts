@@ -228,7 +228,8 @@ export const BIOMES: Record<BiomeId, BiomeDef> = {
   }),
 };
 
-const LEVEL_BIOMES: BiomeId[] = ['sakura', 'bamboo', 'autumn', 'snow', 'burnt', 'rain', 'siege', 'clock'];
+// one per level, in order; the Ronin's duel (level 7) is fought in the bamboo
+const LEVEL_BIOMES: BiomeId[] = ['sakura', 'bamboo', 'autumn', 'snow', 'burnt', 'rain', 'bamboo', 'siege', 'clock'];
 
 export function getBiome(levelId: number): BiomeDef {
   return BIOMES[LEVEL_BIOMES[Math.max(0, Math.min(LEVEL_BIOMES.length - 1, levelId - 1))]];

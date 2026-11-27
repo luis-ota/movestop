@@ -40,3 +40,44 @@ describe('save: economia de energia', () => {
     expect(loadSave().economy).toBe(false);
   });
 });
+
+describe('save: migração para a campanha de nove fases', () => {
+  beforeEach(() => store.clear());
+
+  it('save antigo (v1): estrelas e recordes seguem o Cerco (7 → 8) e o chefe (8 → 9)', () => {
+    withRaw({ version: 1, unlocked: 8, stars: { 6: 3, 7: 2, 8: 1 }, best: { 7: 61.5, 8: 140 } });
+    const save = loadSave();
+    expect(save.version).toBe(2);
+    expect(save.stars).toEqual({ 6: 3, 8: 2, 9: 1 });
+    expect(save.best).toEqual({ 8: 61.5, 9: 140 });
+    expect(save.unlocked).toBe(9); // still reaches the boss; the duel opens with it
+  });
+
+  it('quem não tinha chegado ao Cerco não ganha nada a mais', () => {
+    withRaw({ version: 1, unlocked: 6, stars: { 5: 2 } });
+    const save = loadSave();
+    expect(save.unlocked).toBe(6);
+    expect(save.stars).toEqual({ 5: 2 });
+  });
+
+  it('save sem versão é tratado como v1', () => {
+    const old = { ...defaultSave(), unlocked: 7, stars: { 7: 1 } } as Record<string, unknown>;
+    delete old.version;
+    store.set(KEY, JSON.stringify(old));
+    const save = loadSave();
+    expect(save.unlocked).toBe(8);
+    expect(save.stars).toEqual({ 8: 1 });
+  });
+
+  it('save já migrado (v2) não é migrado de novo', () => {
+    withRaw({ version: 2, unlocked: 7, stars: { 7: 3 } });
+    const save = loadSave();
+    expect(save.unlocked).toBe(7);
+    expect(save.stars).toEqual({ 7: 3 });
+  });
+
+  it('desbloqueio adulterado não passa do número de fases', () => {
+    withRaw({ version: 2, unlocked: 999 });
+    expect(loadSave().unlocked).toBe(9);
+  });
+});

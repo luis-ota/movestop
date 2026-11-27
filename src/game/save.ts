@@ -1,15 +1,19 @@
 import { DEFAULT_OWNED, DEFAULT_SKIN, DEFAULT_THEME, DEFAULT_TRAIL } from './catalog';
 import { isDifficulty, type Difficulty } from './difficulty';
+import { LEVELS } from './levels';
+
+/** v2: the Ronin duel became level 7 (see migrateV1). */
+export const SAVE_VERSION = 2;
 
 export interface SaveData {
-  version: 1;
+  version: number;
   coins: number;
   owned: string[];
   skin: string;
   theme: string;
   trail: string;
   difficulty: Difficulty;
-  /** number of unlocked levels, 1..3 */
+  /** number of unlocked levels, counted from the first (1..LEVELS.length) */
   unlocked: number;
   stars: Record<string, number>;
   best: Record<string, number>;
@@ -25,7 +29,7 @@ const KEY = 'movestop.save.v1';
 
 export function defaultSave(): SaveData {
   return {
-    version: 1,
+    version: SAVE_VERSION,
     coins: 300,
     owned: [...DEFAULT_OWNED],
     skin: DEFAULT_SKIN,
@@ -58,7 +62,11 @@ export function loadSave(): SaveData {
       purchases: [...(parsed.purchases ?? [])],
     };
     save.coins = Math.max(0, Math.floor(save.coins || 0));
-    save.unlocked = Math.min(8, Math.max(1, Math.floor(save.unlocked || 1)));
+    save.unlocked = Math.max(1, Math.floor(save.unlocked || 1));
+    const version = typeof parsed.version === 'number' ? parsed.version : 1;
+    if (version < 2) migrateV1(save);
+    save.version = SAVE_VERSION;
+    save.unlocked = Math.min(LEVELS.length, save.unlocked);
     save.difficulty = isDifficulty(save.difficulty) ? save.difficulty : base.difficulty;
     // a hand-edited save can hold anything: only a literal `true` turns it on
     save.economy = parsed.economy === true;
@@ -66,6 +74,24 @@ export function loadSave(): SaveData {
   } catch {
     return defaultSave();
   }
+}
+
+/**
+ * v1 -> v2: the Ronin duel was inserted as level 7, so Cerco moved 7 -> 8 and
+ * O Relojoeiro 8 -> 9. Stars and best times are keyed by level id and follow
+ * their level; a player who had reached Cerco keeps access to it (unlocked
+ * counts levels from the first, so the duel opens with it).
+ */
+export function migrateV1(save: SaveData): void {
+  for (const table of [save.stars, save.best]) {
+    // highest first, so 7 -> 8 never overwrites the old 8 before it moved
+    for (const from of ['8', '7']) {
+      if (!(from in table)) continue;
+      table[String(Number(from) + 1)] = table[from];
+      delete table[from];
+    }
+  }
+  if (save.unlocked >= 7) save.unlocked += 1;
 }
 
 export function persist(save: SaveData): void {

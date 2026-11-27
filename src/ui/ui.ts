@@ -737,7 +737,7 @@ export class UI {
       <div class="page-head">
         <div>
           <h1 class="page-title">Fases <em>da campanha</em></h1>
-          <p class="page-sub">Três atos. Oito encontros. Uma regra: o tempo obedece ao seu movimento.</p>
+          <p class="page-sub">Três atos. Nove encontros. Uma regra: o tempo obedece ao seu movimento.</p>
         </div>
         <div class="page-actions">
           <button class="btn ghost sm" data-action="roster">Personagens</button>
@@ -1104,7 +1104,7 @@ export class UI {
         this.hudRefs.bossHp.textContent = `${hud.bossHp} / ${hud.bossMax}`;
         this.hudRefs.bossFill.style.width = `${Math.max(0, (hud.bossHp / hud.bossMax) * 100)}%`;
       }
-      const curLevel = LEVELS[Math.min(7, Math.max(0, hud.wave - 1))];
+      const curLevel = LEVELS[Math.min(LEVELS.length - 1, Math.max(0, hud.wave - 1))];
       if (this.currentLevelId) {
         const info = LEVELS.find((l) => l.id === this.currentLevelId);
         if (info) {
