@@ -1,6 +1,6 @@
 import './style.css';
 import { Game, type GameResult, type Loadout } from './game/game';
-import { UI, type DeathView, type UIActions, type WinView } from './ui/ui';
+import { UI, placeCrosshair, type DeathView, type UIActions, type WinView } from './ui/ui';
 import { loadSave, persist } from './game/save';
 import { findItem, findPack, findSkin, findTheme, findTrail, REVIVE_COST, REVIVE_COST_STEP } from './game/catalog';
 import { LEVELS } from './game/levels';
@@ -368,8 +368,7 @@ function startDuelMatch(side: 0 | 1): void {
   const crosshair = document.getElementById('crosshair');
   if (crosshair) {
     crosshair.classList.add('active');
-    crosshair.style.left = `${window.innerWidth / 2}px`;
-    crosshair.style.top = `${window.innerHeight * 0.46}px`;
+    placeCrosshair(crosshair, window.innerWidth / 2, window.innerHeight * 0.46);
   }
   duelInput?.detach();
   duelInput = new DuelInput(duelClient, game);
@@ -681,8 +680,7 @@ window.addEventListener('pointermove', (e) => {
   if (!duelActive) return;
   const crosshair = document.getElementById('crosshair');
   if (!crosshair) return;
-  crosshair.style.left = `${e.clientX}px`;
-  crosshair.style.top = `${e.clientY}px`;
+  placeCrosshair(crosshair, e.clientX, e.clientY);
 });
 
 window.addEventListener('pointerdown', () => audio.init(), { once: true });

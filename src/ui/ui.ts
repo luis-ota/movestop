@@ -236,6 +236,14 @@ function iconButton(action: string, icon: string, label: string): string {
   return `<button class="icon-btn" data-action="${action}" aria-label="${label}" title="${label}">${icon}</button>`;
 }
 
+/**
+ * Moves the crosshair with a transform (composited) instead of left/top, which
+ * re-ran layout and its drop-shadow filter on every mouse move.
+ */
+export function placeCrosshair(el: HTMLElement, x: number, y: number): void {
+  el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+}
+
 export class UI {
   private root: HTMLElement;
   private getSave: () => SaveData;
@@ -327,8 +335,7 @@ export class UI {
 
     window.addEventListener('pointermove', (e) => {
       if (this.active !== 'hud') return;
-      this.crosshair.style.left = `${e.clientX}px`;
-      this.crosshair.style.top = `${e.clientY}px`;
+      placeCrosshair(this.crosshair, e.clientX, e.clientY);
     });
     window.addEventListener('pointerdown', (e) => {
       if (this.active !== 'hud') return;

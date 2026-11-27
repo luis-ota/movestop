@@ -1502,6 +1502,9 @@ body.touch .brief-actions .brief-fullscreen {
   z-index: 8;
   display: none;
   filter: drop-shadow(0 0 1px rgba(243, 239, 228, 0.9)) drop-shadow(0 0 1.5px rgba(25, 24, 21, 0.8));
+  /* placeCrosshair() moves it with transform: its own layer, so following the
+     mouse is a compositor move, not a relayout + re-filter */
+  will-change: transform;
 }
 .crosshair.active {
   display: block;
@@ -3020,12 +3023,18 @@ body.touch .brief-actions .brief-fullscreen {
   width: 116px;
   height: 116px;
   position: relative;
-  filter: drop-shadow(0 8px 18px rgba(10, 14, 12, 0.22));
+  /* box-shadow, not filter: drop-shadow. A filter is re-run every time the radar
+     canvas redraws (12.5 times a second); measured at ~9% of a CPU core on its
+     own. The radar is a circle, so a round box-shadow looks the same. */
+  border-radius: 50%;
+  box-shadow: 0 8px 18px rgba(10, 14, 12, 0.22);
 }
 .radar canvas {
   width: 100%;
   height: 100%;
   display: block;
+  /* its own layer: redrawing the radar no longer repaints the shadow behind it */
+  will-change: transform;
 }
 .radar-n {
   position: absolute;
