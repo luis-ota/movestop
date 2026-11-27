@@ -9,9 +9,9 @@ Shooter voxel de samurai em que o tempo só anda quando você anda. Vite + Three
 
 ## Sobre
 
-MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de oito fases e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
+MOVESTOP é para quem gosta de ação com precisão, estética voxel e desafios de domínio do tempo. O jogo tem uma campanha de nove fases (com o midboss Ronin e o chefe O Relojoeiro) e um duelo 1v1 online com servidor autoritativo, matchmaking, salas privadas, rounds e controles de toque.
 
-Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 85 testes automatizados de movimento, combate, dificuldade, protocolo, rounds, snapshots, abuso e política de proxy.
+Stack principal: **TypeScript**, **Three.js**, **Bun**, **Vite** e **Playwright** para verificação manual/E2E. O repositório inclui 127 testes automatizados (`bun test`) de movimento, navegação e IA dos inimigos, combate, dificuldade, save, ritmo de quadros, protocolo, rounds, snapshots, abuso e política de proxy, além de verificações no navegador (`bun run test:e2e`).
 
 <p align="center">
   <img src="docs/assets/movestop-duel.jpg" alt="Duelo online do MOVESTOP no pátio de outono" width="720">
@@ -30,7 +30,10 @@ bun run dev      # http://localhost:5173
 bun run build
 bun run typecheck:server
 bun run preview
+bun run test:e2e # verificações no navegador (Chrome; PW_CHANNEL=msedge para outro)
 ```
+
+Em desenvolvimento, `http://localhost:5173/?sandbox` abre uma arena de testes: teclas 1–9 e 0 criam inimigos no cursor, B cria o chefe final. O sandbox não entra no build de produção.
 
 ## Controles — desktop
 
@@ -92,7 +95,9 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 ## Estrutura
 
 - `src/game/game.ts` — engine, câmera, combate, IA, ondas, chefe.
-- `src/game/levels.ts` — oito fases e expansão do campo aberto.
+- `src/game/levels.ts` — nove fases, inimigos e expansão do campo aberto.
+- `src/game/navigation.ts` / `src/game/dodge.ts` — rotas dos inimigos (campo de fluxo) e desvio de tiros no Impossível.
+- `src/game/ronin.ts` — regras do midboss Ronin.
 - `src/game/landscape.ts` — vale, rio, ponte, templo, árvores, clima.
 - `src/game/backdrop.ts` — panorama pintado das montanhas, sol/lua e floresta distante.
 - `src/game/voxel.ts` — avatares, haori, lâmina, sombras.
@@ -100,7 +105,8 @@ bun run dev        # Vite em :5173; /ws é proxiado para :8788
 - `src/ui/online.ts` / `src/online.css` — lobby, fila, HUD e resultado do duelo.
 - `src/multiplayer/` — transporte WebSocket e adaptador de input.
 - `server/` — servidor autoritativo, salas, validação e hardening.
-- `tests/` — 85 testes de movimento, dificuldade, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+- `tests/` — 127 testes de movimento, navegação, IA, dificuldade, save, ritmo de quadros, protocolo, rounds, combate, snapshots, abuso e IP de proxy.
+- `e2e/` — verificações no navegador: inimigos no sandbox, renderização e economia de energia.
 
 ## Open source
 
