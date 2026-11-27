@@ -177,8 +177,12 @@ export interface WardTuning {
   fuse: number;
 }
 
-/** Shared by every enemy that can dodge: a short hop, then a pause. */
-const DODGE: DodgeTuning = { speed: 7, time: 0.16, cooldown: 1.6 };
+/**
+ * Shared by every enemy that can dodge: a short hop, then a pause. With a
+ * 0.22 s read, a player bullet (17.5 m/s) fired from closer than ~5.6 m
+ * always lands (dodgeSafeDistance), and a second shot inside 2 s does too.
+ */
+const DODGE: DodgeTuning = { speed: 7, time: 0.16, cooldown: 2, reaction: 0.22 };
 
 const KITE: KiteTuning = {
   approachBeyond: 8.5,

@@ -272,6 +272,8 @@ interface Bullet {
   fromEnemy: Enemy | null;
   parryable: boolean;
   life: number;
+  /** world seconds since fired or parried back (enemies need time to read it) */
+  age: number;
   alive: boolean;
 }
 
@@ -1709,6 +1711,7 @@ export class Game {
     b.fromBoss = false;
     b.fromEnemy = null;
     b.life = 3;
+    b.age = 0; // a new flight: enemies have to read it again
     b.mesh.rotation.y = a;
     // bullet materials are shared: switch this one to the gold set, never repaint in place
     recolorBulletMesh(b.mesh, 0xffd23f, 0xffb01c, 0xffd23f);
@@ -1743,6 +1746,7 @@ export class Game {
       fromEnemy,
       parryable,
       life: 4,
+      age: 0,
       alive: true,
     });
   }
@@ -3075,8 +3079,9 @@ export class Game {
   /**
    * Impossible only: a short sidestep away from an incoming bullet, in world
    * time (stopping freezes it with the bullet, so a planned shot still has a
-   * chance). Never while an attack is charging, bursting or lunging, and never
-   * twice in a row. Returns true while the enemy is mid-dodge (skip its AI).
+   * chance). The bullet must have flown the reaction time first, so close shots
+   * land (dodge.ts). Never while an attack is charging, bursting or lunging, and
+   * never again before the cooldown. Returns true while mid-dodge (skip its AI).
    */
   private updateDodge(e: Enemy, simDt: number, threats: readonly Bullet[]): boolean {
     const dodge = e.def.dodge;
@@ -3089,7 +3094,7 @@ export class Game {
     }
     e.dodgeCd = Math.max(0, e.dodgeCd - simDt);
     if (threats.length === 0 || e.dodgeCd > 0 || e.windup > 0 || e.burstLeft > 0 || e.lungeTime > 0) return false;
-    const side = dodgeDirection(e.x, e.z, e.def.radius, threats, e.strafeDir);
+    const side = dodgeDirection(e.x, e.z, e.def.radius, threats, e.strafeDir, dodge.reaction);
     if (!side) return false;
     e.dodgeX = side.x;
     e.dodgeZ = side.z;
@@ -3270,6 +3275,7 @@ export class Game {
     for (const b of this.bullets) {
       if (!b.alive) continue;
       b.life -= simDt;
+      b.age += simDt;
       if (b.life <= 0) {
         this.removeBullet(b);
         continue;

@@ -320,8 +320,8 @@ async function navigationAroundCover(page: Page): Promise<void> {
   check('controle: sem navegação ela fica presa no U', without < 1.5, { aproximou: +without.toFixed(2) });
 }
 
-/** Counts how many dodges start while shooting at a gunner on a difficulty. */
-async function dodgesOn(page: Page, difficulty: 'hard' | 'impossible'): Promise<number> {
+/** Counts how many dodges start while shooting at a gunner `range` metres away. */
+async function dodgesOn(page: Page, difficulty: 'hard' | 'impossible', range = 10): Promise<number> {
   await page.evaluate((d) => {
     const m = (window as any).__MOVESTOP__;
     m.save.difficulty = d;
@@ -337,8 +337,8 @@ async function dodgesOn(page: Page, difficulty: 'hard' | 'impossible'): Promise<
     };
   }, difficulty);
   await resetArena(page, true);
-  await spawnNear(page, 'gunner', 0, -6);
-  await shootAt(page, 'gunner', 6);
+  await spawnNear(page, 'gunner', 0, -range);
+  await shootAt(page, 'gunner', range < 5 ? 2 : 6);
   return page.evaluate(() => {
     const g = (window as any).__MOVESTOP__.game;
     delete g.updateDodge; // back to the prototype method
@@ -349,13 +349,16 @@ async function dodgesOn(page: Page, difficulty: 'hard' | 'impossible'): Promise<
 async function dodgeOnlyOnImpossible(page: Page): Promise<void> {
   const hard = await dodgesOn(page, 'hard');
   const impossible = await dodgesOn(page, 'impossible');
+  // point blank: the bullet lands before the gunner can read it
+  const close = await dodgesOn(page, 'impossible', 3);
   await page.evaluate(() => {
     const m = (window as any).__MOVESTOP__;
     m.save.difficulty = 'hard';
     m.applyLoadout();
   });
   check('no Difícil os inimigos não desviam de tiro', hard === 0, { desvios: hard });
-  check('no Impossível os inimigos desviam de tiro', impossible > 0, { desvios: impossible });
+  check('no Impossível os inimigos desviam de tiro de longe', impossible > 0, { desvios: impossible });
+  check('no Impossível um tiro à queima-roupa não dá tempo de reagir', close === 0, { desvios: close });
 }
 
 // ---------------------------------------------------------------- ronin and boss
